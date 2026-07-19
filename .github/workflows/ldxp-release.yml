@@ -82,11 +82,11 @@ jobs:
           npm ci
           npm run typecheck
       - name: Build signed Windows packages
-          shell: pwsh
-          env:
-            TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-            TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          run: npx tauri build --ci
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --ci
       - name: Stage release assets
         shell: pwsh
         run: node scripts/release/stage_release_assets.cjs --platform windows --assets-dir target/release/bundle --output-dir release-assets
@@ -115,11 +115,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-        - name: Build signed Apple Silicon packages
-          env:
-            TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-            TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          run: npx tauri build --ci --target aarch64-apple-darwin
+      - name: Build signed Apple Silicon packages
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --ci --target aarch64-apple-darwin
       - name: Stage release assets
         run: node scripts/release/stage_release_assets.cjs --platform macos --mac-arch aarch64 --assets-dir target/aarch64-apple-darwin/release/bundle --output-dir release-assets
       - uses: actions/upload-artifact@v4
@@ -147,11 +147,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-        - name: Build signed Intel packages
-          env:
-            TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-            TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          run: npx tauri build --ci --target x86_64-apple-darwin
+      - name: Build signed Intel packages
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --ci --target x86_64-apple-darwin
       - name: Stage release assets
         run: node scripts/release/stage_release_assets.cjs --platform macos --mac-arch x64 --assets-dir target/x86_64-apple-darwin/release/bundle --output-dir release-assets
       - uses: actions/upload-artifact@v4
@@ -179,11 +179,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-        - name: Build signed universal package
-          env:
-            TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-            TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          run: npx tauri build --ci --target universal-apple-darwin
+      - name: Build signed universal package
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --ci --target universal-apple-darwin
       - name: Stage release assets
         run: node scripts/release/stage_release_assets.cjs --platform macos --mac-arch universal --assets-dir target/universal-apple-darwin/release/bundle --output-dir release-assets
       - uses: actions/upload-artifact@v4
