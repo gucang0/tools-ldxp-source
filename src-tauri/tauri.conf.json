@@ -104,7 +104,7 @@
       }
     },
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFEMDhENzk5QUQxMDE5QUUKUldTdUdSQ3RtZGNJcmZGTUlWK09SalJvZ0srOCthTmp2YTczVHhlR003T29YcDlFaThoZnVjOUoK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERCMENFOEIyMDQ5OTBFQkUKUldTK0Rwa0VzdWdNMnhQS3NpSy9UWDF6VWxheUl2WTZYMzVuc2NGUUJubEYrakQ1VFE5SEp6eTQK",
       "endpoints": [
         "https://github.com/gucang0/tools/releases/latest/download/latest-{{target}}.json",
         "https://github.com/gucang0/tools/releases/latest/download/latest.json"
