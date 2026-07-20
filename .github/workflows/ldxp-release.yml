@@ -56,10 +56,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: release-metadata
-          path: |
-            release-notes.md
-            published-at.txt
-          if-no-files-found: error
+            path: |
+              release-notes.md
+              published-at.txt
+            if-no-files-found: error
+            retention-days: 1
 
   build-windows:
     name: Build Windows x64
@@ -92,9 +93,10 @@ jobs:
         run: node scripts/release/stage_release_assets.cjs --platform windows --assets-dir target/release/bundle --output-dir release-assets
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-assets
-          path: release-assets
-          if-no-files-found: error
+            name: windows-assets
+            path: release-assets
+            if-no-files-found: error
+            retention-days: 1
 
   build-macos-aarch64:
     name: Build macOS Apple Silicon
@@ -124,9 +126,10 @@ jobs:
         run: node scripts/release/stage_release_assets.cjs --platform macos --mac-arch aarch64 --assets-dir target/aarch64-apple-darwin/release/bundle --output-dir release-assets
       - uses: actions/upload-artifact@v4
         with:
-          name: macos-aarch64-assets
-          path: release-assets
-          if-no-files-found: error
+            name: macos-aarch64-assets
+            path: release-assets
+            if-no-files-found: error
+            retention-days: 1
 
   build-macos-x86_64:
     name: Build macOS Intel
@@ -156,9 +159,10 @@ jobs:
         run: node scripts/release/stage_release_assets.cjs --platform macos --mac-arch x64 --assets-dir target/x86_64-apple-darwin/release/bundle --output-dir release-assets
       - uses: actions/upload-artifact@v4
         with:
-          name: macos-x64-assets
-          path: release-assets
-          if-no-files-found: error
+            name: macos-x64-assets
+            path: release-assets
+            if-no-files-found: error
+            retention-days: 1
 
   build-macos-universal:
     name: Build macOS universal DMG
@@ -188,9 +192,10 @@ jobs:
         run: node scripts/release/stage_release_assets.cjs --platform macos --mac-arch universal --assets-dir target/universal-apple-darwin/release/bundle --output-dir release-assets
       - uses: actions/upload-artifact@v4
         with:
-          name: macos-universal-assets
-          path: release-assets
-          if-no-files-found: error
+            name: macos-universal-assets
+            path: release-assets
+            if-no-files-found: error
+            retention-days: 1
 
   publish:
     name: Publish approved candidate
