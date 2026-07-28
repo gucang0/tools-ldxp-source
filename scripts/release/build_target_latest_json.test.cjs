@@ -48,7 +48,7 @@ test('builds manifests from the same normalized assets uploaded to GitHub', () =
   });
 });
 
-test('builds a macOS target manifest from the raw Tauri updater archive', () => {
+test('builds Universal macOS updater manifests for new and legacy targets', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-target-manifest-'));
   const rawAssetsDir = path.join(root, 'bundle');
   const assetsDir = path.join(root, 'staged');
@@ -67,24 +67,27 @@ test('builds a macOS target manifest from the raw Tauri updater archive', () => 
     platform: 'macos',
     assetsDir: rawAssetsDir,
     outputDir: assetsDir,
-    macArch: 'aarch64',
+    macArch: 'universal',
   });
-  const [manifestPath] = buildTargetManifests({
+  const outputs = buildTargetManifests({
     version: '1.2.3',
     repo: 'jlcodes99/cockpit-tools',
     assetsDir,
     notesFile,
     publishedAt: '2026-07-10T12:00:00Z',
     outputDir,
-    targets: ['darwin-aarch64-app'],
+    targets: ['darwin-universal', 'darwin-aarch64-app', 'darwin-x86_64-app'],
   });
 
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-  assert.equal(
-    manifest.url,
-    'https://github.com/jlcodes99/cockpit-tools/releases/download/v1.2.3/Cockpit.Tools_aarch64.app.tar.gz',
-  );
-  assert.equal(manifest.signature, 'mac-signature');
+  assert.equal(outputs.length, 3);
+  for (const manifestPath of outputs) {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    assert.equal(
+      manifest.url,
+      'https://github.com/jlcodes99/cockpit-tools/releases/download/v1.2.3/Cockpit.Tools_universal.app.tar.gz',
+    );
+    assert.equal(manifest.signature, 'mac-signature');
+  }
 });
 
 test('rejects updater assets that bypass stable staging', () => {
@@ -143,8 +146,9 @@ test('supports every staged release target', () => {
   const notesFile = path.join(root, 'notes.md');
   const outputDir = path.join(root, 'output');
   const assetsByTarget = {
-    'darwin-aarch64-app': 'Cockpit.Tools_1.2.3_aarch64.app.tar.gz',
-    'darwin-x86_64-app': 'Cockpit.Tools_1.2.3_x64.app.tar.gz',
+    'darwin-universal': 'Cockpit.Tools_1.2.3_universal.app.tar.gz',
+    'darwin-aarch64-app': 'Cockpit.Tools_1.2.3_universal.app.tar.gz',
+    'darwin-x86_64-app': 'Cockpit.Tools_1.2.3_universal.app.tar.gz',
     'windows-x86_64-msi': 'Cockpit.Tools_1.2.3_x64_en-US.msi',
     'windows-x86_64-nsis': 'Cockpit.Tools_1.2.3_x64-setup.exe',
     'linux-x86_64-appimage': 'Cockpit.Tools_1.2.3_amd64.AppImage',
@@ -157,7 +161,7 @@ test('supports every staged release target', () => {
 
   fs.mkdirSync(assetsDir, { recursive: true });
   fs.writeFileSync(notesFile, 'Release notes');
-  for (const assetName of Object.values(assetsByTarget)) {
+  for (const assetName of new Set(Object.values(assetsByTarget))) {
     fs.writeFileSync(path.join(assetsDir, assetName), 'package');
     fs.writeFileSync(path.join(assetsDir, `${assetName}.sig`), `${assetName}-signature`);
   }

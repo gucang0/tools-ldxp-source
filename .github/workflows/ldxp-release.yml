@@ -98,72 +98,6 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  build-macos-aarch64:
-    name: Build macOS Apple Silicon
-    needs: prepare
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: sidecars/cockpit-cliproxy/go.mod
-          cache-dependency-path: sidecars/cockpit-cliproxy/go.sum
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-      - run: npm ci
-      - run: npm run typecheck
-      - name: Build signed Apple Silicon packages
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npx tauri build --ci --target aarch64-apple-darwin
-      - name: Stage release assets
-        run: node scripts/release/stage_release_assets.cjs --platform macos --mac-arch aarch64 --assets-dir target/aarch64-apple-darwin/release/bundle --output-dir release-assets
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos-aarch64-assets
-          path: release-assets
-          if-no-files-found: error
-          retention-days: 1
-
-  build-macos-x86_64:
-    name: Build macOS Intel
-    needs: prepare
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-apple-darwin
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: sidecars/cockpit-cliproxy/go.mod
-          cache-dependency-path: sidecars/cockpit-cliproxy/go.sum
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-      - run: npm ci
-      - run: npm run typecheck
-      - name: Build signed Intel packages
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npx tauri build --ci --target x86_64-apple-darwin
-      - name: Stage release assets
-        run: node scripts/release/stage_release_assets.cjs --platform macos --mac-arch x64 --assets-dir target/x86_64-apple-darwin/release/bundle --output-dir release-assets
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos-x64-assets
-          path: release-assets
-          if-no-files-found: error
-          retention-days: 1
-
   build-macos-universal:
     name: Build macOS universal DMG
     needs: prepare
@@ -203,8 +137,6 @@ jobs:
     needs:
       - prepare
       - build-windows
-      - build-macos-aarch64
-      - build-macos-x86_64
       - build-macos-universal
     runs-on: ubuntu-latest
     env:
@@ -246,7 +178,7 @@ jobs:
             --assets-dir release-assets \
             --notes-file release-metadata/release-notes.md \
             --published-at "$(cat release-metadata/published-at.txt)" \
-            --targets "windows-x86_64-msi,windows-x86_64-nsis,darwin-aarch64-app,darwin-x86_64-app" \
+            --targets "windows-x86_64-msi,windows-x86_64-nsis,darwin-universal,darwin-aarch64-app,darwin-x86_64-app" \
             --output-dir target-manifests
           node scripts/release/build_ldxp_latest_json.cjs \
             --version "${VERSION}" \
@@ -266,5 +198,5 @@ jobs:
           node scripts/release/verify_published_updater_manifests.cjs \
             --version "${VERSION}" \
             --repo "${RELEASE_REPOSITORY}" \
-            --targets "windows-x86_64-msi,windows-x86_64-nsis,darwin-aarch64-app,darwin-x86_64-app" \
+            --targets "windows-x86_64-msi,windows-x86_64-nsis,darwin-universal,darwin-aarch64-app,darwin-x86_64-app" \
             --legacy

@@ -295,8 +295,13 @@ pub fn run() {
             // 初始化 Updater 插件
             #[cfg(desktop)]
             {
+                #[cfg(target_os = "macos")]
+                let updater = tauri_plugin_updater::Builder::new().target("darwin-universal");
+                #[cfg(not(target_os = "macos"))]
+                let updater = tauri_plugin_updater::Builder::new();
+
                 app.handle()
-                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+                    .plugin(updater.build())?;
                 app.handle().plugin(tauri_plugin_process::init())?;
                 app.handle().plugin(tauri_plugin_autostart::init(
                     tauri_plugin_autostart::MacosLauncher::LaunchAgent,

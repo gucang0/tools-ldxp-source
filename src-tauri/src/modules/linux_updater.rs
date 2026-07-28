@@ -711,12 +711,7 @@ mod imp {
 
     #[cfg(target_os = "macos")]
     fn desktop_updater_target() -> Option<String> {
-        let arch = match std::env::consts::ARCH {
-            "aarch64" => "aarch64",
-            "x86_64" => "x86_64",
-            _ => return None,
-        };
-        Some(format!("darwin-{}-app", arch))
+        Some("darwin-universal".to_string())
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]

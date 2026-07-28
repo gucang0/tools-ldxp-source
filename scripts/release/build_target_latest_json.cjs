@@ -5,8 +5,11 @@ const path = require("path");
 const { normalizeReleaseAssetName } = require("./stage_release_assets.cjs");
 
 const TARGET_SPECS = {
-  "darwin-aarch64-app": /_aarch64\.app\.tar\.gz$/,
-  "darwin-x86_64-app": /_x64\.app\.tar\.gz$/,
+  "darwin-universal": /_universal\.app\.tar\.gz$/,
+  // Keep the two architecture-specific names for already-installed 1.3.10
+  // clients. Both receive the same Universal macOS updater archive.
+  "darwin-aarch64-app": /_universal\.app\.tar\.gz$/,
+  "darwin-x86_64-app": /_universal\.app\.tar\.gz$/,
   "windows-x86_64-msi": /_x64_en-US\.msi$/,
   "windows-x86_64-nsis": /_x64-setup\.exe$/,
   "linux-x86_64-appimage": /_amd64\.AppImage$/,

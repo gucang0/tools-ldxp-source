@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const TARGETS = [
+  'darwin-universal',
   'darwin-aarch64-app',
   'darwin-x86_64-app',
   'windows-x86_64-msi',
@@ -53,8 +54,10 @@ function main() {
     TARGETS.map((target) => [target, readManifest(manifestsDir, target, version)]),
   );
 
-  platforms['darwin-aarch64'] = { ...platforms['darwin-aarch64-app'] };
-  platforms['darwin-x86_64'] = { ...platforms['darwin-x86_64-app'] };
+  platforms['darwin-aarch64'] = { ...platforms['darwin-universal'] };
+  platforms['darwin-x86_64'] = { ...platforms['darwin-universal'] };
+  platforms['darwin-aarch64-app'] = { ...platforms['darwin-universal'] };
+  platforms['darwin-x86_64-app'] = { ...platforms['darwin-universal'] };
   platforms['windows-x86_64'] = { ...platforms['windows-x86_64-msi'] };
 
   fs.writeFileSync(
