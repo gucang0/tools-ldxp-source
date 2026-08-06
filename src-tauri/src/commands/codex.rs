@@ -1632,6 +1632,7 @@ pub async fn update_codex_account_note(
     account_password: Option<String>,
     phone_number: Option<String>,
     mail_url: Option<String>,
+    chatgpt_account_id: Option<String>,
 ) -> Result<CodexAccount, String> {
     codex_account::update_account_note(
         &account_id,
@@ -1642,6 +1643,7 @@ pub async fn update_codex_account_note(
             phone_number,
             mail_url,
         },
+        chatgpt_account_id,
     )
 }
 
@@ -3184,6 +3186,7 @@ pub async fn codex_local_access_save_accounts(
     account_ids: Vec<String>,
     restrict_free_accounts: Option<bool>,
     backup_account_ids: Option<Vec<String>>,
+    preferred_account_ids: Option<Vec<String>>,
     session_affinity: Option<bool>,
     session_affinity_ttl_ms: Option<i64>,
 ) -> Result<CodexLocalAccessState, String> {
@@ -3191,6 +3194,7 @@ pub async fn codex_local_access_save_accounts(
         account_ids,
         restrict_free_accounts.unwrap_or(true),
         backup_account_ids,
+        preferred_account_ids,
         session_affinity,
         session_affinity_ttl_ms,
     )

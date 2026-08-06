@@ -72,6 +72,7 @@ export interface CodexAccountNoteUpdate {
   accountPassword?: string;
   phoneNumber?: string;
   mailUrl?: string;
+  chatgptAccountId?: string;
 }
 
 export interface CodexBatchDeleteError {
@@ -120,6 +121,11 @@ export interface CodexAgentIdentity {
 
 export function isCodexAgentIdentityAccount(account?: CodexAccount | null): boolean {
   return Boolean(account?.agent_identity?.agent_runtime_id?.trim());
+}
+
+/** ChatGPT Web Session 导入账号：仅支持查看额度，不可启动/切号/加入 API。 */
+export function isCodexWebSessionAccount(account?: CodexAccount | null): boolean {
+  return (account?.token_source_mode || "").trim() === "chatgpt_web_session";
 }
 
 /** Codex 配额数据 */
@@ -1100,7 +1106,9 @@ export function getCodexSubscriptionPresentation(
   };
 }
 
-function isCodexOpaqueAccessTokenOnlyAccount(account: CodexAccount): boolean {
+export function isCodexOpaqueAccessTokenOnlyAccount(
+  account: CodexAccount,
+): boolean {
   const accessToken = account.tokens?.access_token?.trim() || "";
   const refreshToken = account.tokens?.refresh_token?.trim() || "";
   return accessToken.startsWith("at-") && !refreshToken;
