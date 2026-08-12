@@ -7,16 +7,12 @@ use std::path::{Path, PathBuf};
 use super::config;
 use super::logger;
 
-const LDXP_PROMOTION_URL: &str =
-    "https://raw.githubusercontent.com/gucang0/tools/main/promotion.json";
 const ANNOUNCEMENT_CACHE_FILE: &str = "announcement_cache.json";
-const LDXP_PROMOTION_CACHE_FILE: &str = "ldxp_promotion_cache.json";
 const ANNOUNCEMENT_FORCE_REFRESH_ATTEMPTS_FILE: &str =
     "announcement_force_refresh_attempt_versions.json";
 const ANNOUNCEMENT_READ_IDS_FILE: &str = "announcement_read_ids.json";
 const ANNOUNCEMENT_LOCAL_OVERRIDE_FILE: &str = "announcements.local.json";
 const CACHE_TTL_MS: i64 = 3_600_000;
-const LDXP_PROMOTION_CACHE_TTL_MS: i64 = 9 * 60 * 1000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -281,22 +277,6 @@ struct AnnouncementCacheLegacy {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct LdxpPromotionConfig {
-    #[serde(default)]
-    revision: String,
-    text: String,
-    url: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LdxpPromotionCache {
-    time: i64,
-    promotion: LdxpPromotionConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct AnnouncementState {
     pub announcements: Vec<Announcement>,
     pub unread_ids: Vec<String>,
@@ -334,10 +314,6 @@ fn get_shared_dir() -> Result<PathBuf, String> {
 
 fn get_cache_path() -> Result<PathBuf, String> {
     Ok(get_shared_dir()?.join(ANNOUNCEMENT_CACHE_FILE))
-}
-
-fn get_ldxp_promotion_cache_path() -> Result<PathBuf, String> {
-    Ok(get_shared_dir()?.join(LDXP_PROMOTION_CACHE_FILE))
 }
 
 fn get_force_refresh_attempts_path() -> Result<PathBuf, String> {
@@ -450,165 +426,16 @@ fn save_cache(payload: &AnnouncementResponse) -> Result<(), String> {
         .map_err(|e| format!("写入公告缓存失败: {}", e))
 }
 
-fn empty_sponsor_module() -> SponsorModule {
-    SponsorModule {
-        enabled: true,
-        entry_visible: true,
-        title: String::new(),
-        subtitle: String::new(),
-        target_versions: default_target_versions(),
-        target_languages: None,
-        created_at: String::new(),
-        expires_at: None,
-        locales: None,
-        sponsors: Vec::new(),
-    }
-}
-
-fn fallback_ldxp_promotion() -> TopRightAd {
-    TopRightAd {
-        id: "ldxp-promotion".to_string(),
-        enabled: true,
-        relay_related: false,
-        priority: 0,
-        text: "低价gpt plus成品号。850r plus年卡代充全程质保，各种AI账号的代充值均在小铺中.联系qq 854760178下单".to_string(),
-        badge: Some("推广".to_string()),
-        cta_label: None,
-        cta_url: Some("https://pay.ldxp.cn/shop/FPS8MBSL".to_string()),
-        display_mode: None,
-        display_pages: None,
-        display_platforms: None,
-        exclude_pages: None,
-        exclude_platforms: None,
-        target_versions: default_target_versions(),
-        target_languages: None,
-        created_at: String::new(),
-        expires_at: None,
-        locales: None,
-    }
-}
-
-fn promotion_config_to_ad(config: &LdxpPromotionConfig) -> Option<TopRightAd> {
-    let text = config.text.trim();
-    let url = config.url.trim();
-    if text.is_empty() || text.chars().count() > 300 {
-        return None;
-    }
-
-    let parsed_url = reqwest::Url::parse(url).ok()?;
-    if parsed_url.scheme() != "https" || parsed_url.host_str().is_none() {
-        return None;
-    }
-
-    let mut ad = fallback_ldxp_promotion();
-    ad.text = text.to_string();
-    ad.cta_url = Some(parsed_url.into());
-    Some(ad)
-}
-
-fn load_ldxp_promotion_cache() -> Result<Option<LdxpPromotionCache>, String> {
-    let path = get_ldxp_promotion_cache_path()?;
-    if !path.exists() {
-        return Ok(None);
-    }
-
-    let content = fs::read_to_string(&path).map_err(|e| format!("读取推广缓存失败: {}", e))?;
-    let cache = match serde_json::from_str::<LdxpPromotionCache>(&content) {
-        Ok(cache) => cache,
-        Err(_) => return Ok(None),
-    };
-
-    if promotion_config_to_ad(&cache.promotion).is_some() {
-        Ok(Some(cache))
-    } else {
-        Ok(None)
-    }
-}
-
-fn save_ldxp_promotion_cache(promotion: &LdxpPromotionConfig) -> Result<(), String> {
-    let cache = LdxpPromotionCache {
-        time: Utc::now().timestamp_millis(),
-        promotion: promotion.clone(),
-    };
-    let content = serde_json::to_string_pretty(&cache)
-        .map_err(|e| format!("序列化推广缓存失败: {}", e))?;
-    crate::modules::atomic_write::write_string_atomic(&get_ldxp_promotion_cache_path()?, &content)
-        .map_err(|e| format!("写入推广缓存失败: {}", e))
-}
-
-async fn fetch_ldxp_promotion() -> Result<TopRightAd, String> {
-    let client = reqwest::Client::builder()
-        .user_agent("Cockpit-Tools")
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| format!("创建推广 HTTP 客户端失败: {}", e))?;
-
-    let response = client
-        .get(LDXP_PROMOTION_URL)
-        .header("Cache-Control", "no-cache")
-        .header("Pragma", "no-cache")
-        .send()
-        .await
-        .map_err(|e| format!("拉取推广配置失败: {}", e))?;
-
-    if !response.status().is_success() {
-        return Err(format!("推广配置接口返回异常状态: {}", response.status()));
-    }
-
-    let promotion = response
-        .json::<LdxpPromotionConfig>()
-        .await
-        .map_err(|e| format!("解析推广配置失败: {}", e))?;
-    let ad = promotion_config_to_ad(&promotion)
-        .ok_or_else(|| "推广配置无效，仅接受非空文案和 HTTPS 链接".to_string())?;
-
-    if let Err(error) = save_ldxp_promotion_cache(&promotion) {
-        logger::log_warn(&format!("[LDXP Promotion] 保存推广缓存失败: {}", error));
-    }
-    Ok(ad)
-}
-
-async fn load_ldxp_promotion(force_refresh: bool) -> TopRightAd {
-    let cached = load_ldxp_promotion_cache().ok().flatten();
-    let cache_is_fresh = cached
-        .as_ref()
-        .map(|cache| Utc::now().timestamp_millis() - cache.time < LDXP_PROMOTION_CACHE_TTL_MS)
-        .unwrap_or(false);
-
-    if !force_refresh && cache_is_fresh {
-        if let Some(cache) = cached.as_ref() {
-            if let Some(ad) = promotion_config_to_ad(&cache.promotion) {
-                return ad;
-            }
-        }
-    }
-
-    if crate::modules::config::get_user_config().external_network_enabled {
-        match fetch_ldxp_promotion().await {
-            Ok(ad) => return ad,
-            Err(error) => logger::log_warn(&format!(
-                "[LDXP Promotion] 拉取远端推广失败，尝试使用已验证的本地缓存: {}",
-                error
-            )),
-        }
-    }
-
-    cached
-        .as_ref()
-        .and_then(|cache| promotion_config_to_ad(&cache.promotion))
-        .unwrap_or_else(fallback_ldxp_promotion)
-}
-
-fn controlled_announcement_response(ad: TopRightAd) -> AnnouncementResponse {
+fn controlled_announcement_response() -> AnnouncementResponse {
     AnnouncementResponse {
-        version: "ldxp".to_string(),
+        version: "noncommercial".to_string(),
         force_refresh_versions: Vec::new(),
         announcements: Vec::new(),
-        top_right_ad: Some(ad.clone()),
+        top_right_ad: None,
         api_relay_enabled: true,
-        top_right_ads_enabled: true,
-        top_right_ads: vec![ad],
-        sponsor_module: Some(empty_sponsor_module()),
+        top_right_ads_enabled: false,
+        top_right_ads: Vec::new(),
+        sponsor_module: None,
     }
 }
 
@@ -1129,7 +956,7 @@ fn filter_sponsor_module(
 }
 
 async fn fetch_remote_announcements() -> Result<AnnouncementResponse, String> {
-    Ok(controlled_announcement_response(load_ldxp_promotion(false).await))
+    Ok(controlled_announcement_response())
 }
 
 fn should_force_refresh_for_version(payload: &AnnouncementResponse, current_version: &str) -> bool {
@@ -1198,60 +1025,7 @@ async fn try_load_force_refreshed_announcements(
 }
 
 async fn load_announcements_raw() -> Result<AnnouncementResponse, String> {
-    if let Some(local_data) = load_local_announcements()? {
-        return Ok(local_data);
-    }
-
-    let current_version = env!("CARGO_PKG_VERSION");
-    let cached = load_cache()?;
-    let cache_is_fresh = cached
-        .as_ref()
-        .map(|cache| Utc::now().timestamp_millis() - cache.time < CACHE_TTL_MS)
-        .unwrap_or(false);
-
-    let external_network_enabled =
-        crate::modules::config::get_user_config().external_network_enabled;
-
-    // #1104: when external network is disabled, never hit remote announcement URLs.
-    if !external_network_enabled {
-        if let Some(cache) = cached {
-            logger::log_info("[Announcement] 外连已关闭，使用本地缓存公告");
-            return Ok(cache.data);
-        }
-        return Err("外连已关闭，无法拉取远端公告".to_string());
-    }
-
-    if let Some(payload) =
-        try_load_force_refreshed_announcements(current_version, cache_is_fresh).await?
-    {
-        return Ok(payload);
-    }
-
-    if let Some(cache) = cached {
-        if cache_is_fresh {
-            logger::log_info("[Announcement] 使用本地缓存公告");
-            return Ok(cache.data);
-        }
-    }
-
-    match fetch_remote_announcements().await {
-        Ok(payload) => {
-            if let Err(err) = save_cache(&payload) {
-                logger::log_warn(&format!("[Announcement] 保存公告缓存失败: {}", err));
-            }
-            Ok(payload)
-        }
-        Err(err) => {
-            logger::log_warn(&format!(
-                "[Announcement] 拉取远端公告失败，尝试回退缓存: {}",
-                err
-            ));
-            if let Some(cache) = load_cache()? {
-                return Ok(cache.data);
-            }
-            Err(err)
-        }
-    }
+    Ok(controlled_announcement_response())
 }
 
 pub async fn get_announcement_state() -> Result<AnnouncementState, String> {
@@ -1263,16 +1037,15 @@ pub async fn get_announcement_state() -> Result<AnnouncementState, String> {
 }
 
 pub async fn get_top_right_ad_state() -> Result<TopRightAdState, String> {
-    let ad = load_ldxp_promotion(false).await;
     Ok(TopRightAdState {
-        ad: Some(ad.clone()),
-        ads: vec![ad],
+        ad: None,
+        ads: Vec::new(),
     })
 }
 
 pub async fn get_sponsor_module_state() -> Result<SponsorModuleState, String> {
     Ok(SponsorModuleState {
-        sponsor_module: Some(empty_sponsor_module()),
+        sponsor_module: None,
     })
 }
 
@@ -1281,11 +1054,7 @@ pub async fn force_refresh_sponsor_module() -> Result<SponsorModuleState, String
 }
 
 pub async fn force_refresh_top_right_ad() -> Result<TopRightAdState, String> {
-    let ad = load_ldxp_promotion(true).await;
-    Ok(TopRightAdState {
-        ad: Some(ad.clone()),
-        ads: vec![ad],
-    })
+    get_top_right_ad_state().await
 }
 
 pub async fn mark_announcement_as_read(id: &str) -> Result<(), String> {

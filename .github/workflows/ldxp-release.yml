@@ -1,56 +1,117 @@
-name: LDXP Release Candidate
+name: Noncommercial Release Candidate
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: Exact upstream version already prepared on this branch
+        description: Exact official Cockpit Tools version prepared on this ref
         required: true
-        default: '1.3.14'
+        type: string
+      upstream_commit:
+        description: Exact official tag commit (40 lowercase hex characters)
+        required: true
         type: string
       publish:
-        description: Publish the verified candidate to the public LDXP update channel
+        description: Publish after every release gate passes
         required: true
         default: false
         type: boolean
 
+concurrency:
+  group: noncommercial-release-${{ inputs.version }}
+  cancel-in-progress: false
+
 env:
   NODE_VERSION: '20'
   RELEASE_REPOSITORY: gucang0/tools
+  UPSTREAM_REPOSITORY: jlcodes99/cockpit-tools
+  RELEASE_TARGETS: windows-x86_64-msi,windows-x86_64-nsis,darwin-universal,darwin-aarch64-app,darwin-x86_64-app
 
 jobs:
-  prepare:
-    name: Validate source and create release metadata
+  validate:
+    name: Validate source, diff, and frontend
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.value }}
+      previous_latest_tag: ${{ steps.previous.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - id: version
-        name: Verify requested version
+          cache: npm
+      - name: Verify version and official source identity
+        id: version
         env:
           REQUESTED_VERSION: ${{ inputs.version }}
+          REQUESTED_UPSTREAM_COMMIT: ${{ inputs.upstream_commit }}
+        shell: bash
         run: |
           set -euo pipefail
-          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
-          TAURI_VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
-          test "${REQUESTED_VERSION}" = "${PACKAGE_VERSION}"
-          test "${REQUESTED_VERSION}" = "${TAURI_VERSION}"
-          echo "value=${PACKAGE_VERSION}" >> "$GITHUB_OUTPUT"
+          [[ "${REQUESTED_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "${REQUESTED_UPSTREAM_COMMIT}" =~ ^[0-9a-f]{40}$ ]]
+          git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git" 2>/dev/null || true
+          git fetch --force upstream "refs/tags/v${REQUESTED_VERSION}:refs/tags/upstream-v${REQUESTED_VERSION}"
+          ACTUAL_COMMIT="$(git rev-parse "upstream-v${REQUESTED_VERSION}^{commit}")"
+          test "${ACTUAL_COMMIT}" = "${REQUESTED_UPSTREAM_COMMIT}"
+          git merge-base --is-ancestor "${ACTUAL_COMMIT}" HEAD
+          node scripts/release/validate_noncommercial_customization.cjs --version "${REQUESTED_VERSION}"
+          echo "value=${REQUESTED_VERSION}" >> "${GITHUB_OUTPUT}"
+      - name: Reject customization outside the allowlist
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --name-only "upstream-v${VERSION}..HEAD" | sort -u > actual-diff.txt
+          sort -u .github/ldxp-customization-allowlist.txt > allowed-diff.txt
+          comm -23 actual-diff.txt allowed-diff.txt > unexpected-diff.txt
+          if [ -s unexpected-diff.txt ]; then
+            echo "Unexpected customization files:"
+            cat unexpected-diff.txt
+            exit 1
+          fi
+          cat actual-diff.txt
+      - name: Install, typecheck, test, and build frontend
+        run: |
+          npm ci
+          npm run typecheck
+          node --test scripts/release/*.test.cjs
+          npm run build
+      - name: Record previous stable release
+        id: previous
+        env:
+          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="$(gh api "repos/${RELEASE_REPOSITORY}/releases/latest" --jq .tag_name)"
+          test -n "${TAG}"
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
       - name: Create release metadata
         env:
           VERSION: ${{ steps.version.outputs.value }}
-          SOURCE_REVISION: ${{ github.sha }}
+          UPSTREAM_COMMIT: ${{ inputs.upstream_commit }}
+        shell: bash
         run: |
           cat > release-notes.md <<EOF
-          Custom LDXP build based on Cockpit Tools v${VERSION}.
+          ## Unofficial noncommercial build
 
-          - Keeps the upstream application feature set.
-          - Uses the LDXP updater channel and controlled promotion configuration.
-          - Source revision: ${SOURCE_REVISION}
+          This is an unofficial modified build based on the official [Cockpit Tools v${VERSION}](https://github.com/${UPSTREAM_REPOSITORY}/releases/tag/v${VERSION}) source (${UPSTREAM_COMMIT}). It is not endorsed by or affiliated with the upstream author.
+
+          Changes from upstream:
+
+          - Remote announcements, top promotions, and Sponsor content are disabled.
+          - Application updates use the signed noncommercial update channel at [gucang0/tools](https://github.com/${RELEASE_REPOSITORY}).
+          - The remaining application feature set follows the corresponding official release.
+
+          Original project: https://github.com/${UPSTREAM_REPOSITORY}
+
+          Modified source: https://github.com/gucang0/tools-ldxp-source
+
+          License: [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/). This build is for personal and noncommercial sharing only.
           EOF
           date -u +"%Y-%m-%dT%H:%M:%SZ" > published-at.txt
       - uses: actions/upload-artifact@v4
@@ -59,12 +120,13 @@ jobs:
           path: |
             release-notes.md
             published-at.txt
+            actual-diff.txt
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 3
 
   build-windows:
-    name: Build Windows x64
-    needs: prepare
+    name: Build and inspect Windows x64
+    needs: validate
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -77,30 +139,82 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-      - name: Install dependencies and typecheck
+      - name: Verify the official Windows installer payload
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
+          EXPECTED_VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          npm ci
-          npm run typecheck
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path official-installer | Out-Null
+          $assetName = "Cockpit.Tools_$env:EXPECTED_VERSION`_x64-setup.exe"
+          gh release download "v$env:EXPECTED_VERSION" --repo $env:UPSTREAM_REPOSITORY --pattern $assetName --dir official-installer
+          $setup = Get-Item (Join-Path official-installer $assetName)
+          $hash = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash
+          $signature = Get-AuthenticodeSignature $setup.FullName
+          "Official installer SHA256: $hash"
+          "Official installer Authenticode status (informational): $($signature.Status)"
+          if ($setup.VersionInfo.ProductVersion -notlike "$env:EXPECTED_VERSION*") {
+            throw "Official installer product version mismatch: $($setup.VersionInfo.ProductVersion)"
+          }
+          & 7z x $setup.FullName '-oofficial-unpacked' -y | Out-Null
+          $payload = @(Get-ChildItem official-unpacked -Recurse -File -Filter 'cockpit-tools.exe')
+          if ($payload.Count -ne 1) { throw "Expected one official cockpit-tools.exe payload; found $($payload.Count)" }
+          if ($payload[0].VersionInfo.ProductVersion -notlike "$env:EXPECTED_VERSION*") {
+            throw "Official payload product version mismatch: $($payload[0].VersionInfo.ProductVersion)"
+          }
+          $bytes = [System.IO.File]::ReadAllBytes($payload[0].FullName)
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+          $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          if ($machine -ne 0x8664) { throw ('Official payload is not x64: 0x{0:X4}' -f $machine) }
       - name: Build signed Windows packages
         shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npx tauri build --ci
-      - name: Stage release assets
+        run: |
+          npm ci
+          npm run typecheck
+          npx tauri build --ci
+      - name: Verify Windows application version and x64 architecture
         shell: pwsh
-        run: node scripts/release/stage_release_assets.cjs --platform windows --assets-dir target/release/bundle --output-dir release-assets
+        env:
+          EXPECTED_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-Item 'target/release/cockpit-tools.exe'
+          if ($exe.VersionInfo.ProductVersion -notlike "$env:EXPECTED_VERSION*") {
+            throw "Product version mismatch: $($exe.VersionInfo.ProductVersion)"
+          }
+          $bytes = [System.IO.File]::ReadAllBytes($exe.FullName)
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+          $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          if ($machine -ne 0x8664) { throw ('Unexpected PE machine: 0x{0:X4}' -f $machine) }
+          $signature = Get-AuthenticodeSignature $exe.FullName
+          "Authenticode status (informational): $($signature.Status)"
+      - name: Stage and validate Windows release assets
+        shell: pwsh
+        run: |
+          node scripts/release/stage_release_assets.cjs --platform windows --assets-dir target/release/bundle --output-dir release-assets
+          $setup = @(Get-ChildItem release-assets -File -Filter '*_x64-setup.exe')
+          $msi = @(Get-ChildItem release-assets -File -Filter '*_x64_en-US.msi')
+          if ($setup.Count -ne 1 -or $msi.Count -ne 1) { throw 'Expected one NSIS and one MSI package' }
+          foreach ($asset in @($setup[0], $msi[0])) {
+            $sig = "$($asset.FullName).sig"
+            if (!(Test-Path $sig) -or (Get-Item $sig).Length -eq 0) {
+              throw "Missing updater signature: $sig"
+            }
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: windows-assets
           path: release-assets
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 3
 
   build-macos-universal:
-    name: Build macOS universal DMG
-    needs: prepare
+    name: Build and inspect macOS Universal
+    needs: validate
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -115,35 +229,58 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-      - run: npm ci
-      - run: npm run typecheck
-      - name: Build signed universal package
+      - name: Build signed Universal package
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npx tauri build --ci --target universal-apple-darwin
-      - name: Stage release assets
-        run: node scripts/release/stage_release_assets.cjs --platform macos --mac-arch universal --assets-dir target/universal-apple-darwin/release/bundle --output-dir release-assets
+        run: |
+          npm ci
+          npm run typecheck
+          npx tauri build --ci --target universal-apple-darwin
+      - name: Verify Universal application architecture and version
+        env:
+          EXPECTED_VERSION: ${{ needs.validate.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="target/universal-apple-darwin/release/bundle/macos/Cockpit Tools.app"
+          BINARY="${APP}/Contents/MacOS/cockpit-tools"
+          test -f "${BINARY}"
+          lipo -verify_arch x86_64 arm64 "${BINARY}"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${APP}/Contents/Info.plist")" = "${EXPECTED_VERSION}"
+          codesign --display --verbose=2 "${APP}" || true
+      - name: Stage and validate macOS release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/release/stage_release_assets.cjs --platform macos --mac-arch universal --assets-dir target/universal-apple-darwin/release/bundle --output-dir release-assets
+          test "$(find release-assets -maxdepth 1 -type f -name '*_universal.dmg' | wc -l | tr -d ' ')" = 1
+          test "$(find release-assets -maxdepth 1 -type f -name '*_universal.app.tar.gz' | wc -l | tr -d ' ')" = 1
+          test "$(find release-assets -maxdepth 1 -type f -name '*_universal.app.tar.gz.sig' | wc -l | tr -d ' ')" = 1
       - uses: actions/upload-artifact@v4
         with:
           name: macos-universal-assets
           path: release-assets
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 3
 
   publish:
-    name: Publish approved candidate
+    name: Verify signatures and publish atomically
     if: ${{ inputs.publish }}
     needs:
-      - prepare
+      - validate
       - build-windows
       - build-macos-universal
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
-      VERSION: ${{ needs.prepare.outputs.version }}
+      VERSION: ${{ needs.validate.outputs.version }}
+      PREVIOUS_LATEST_TAG: ${{ needs.validate.outputs.previous_latest_tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.LDXP_RELEASE_TOKEN }}
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -156,47 +293,125 @@ jobs:
         with:
           name: release-metadata
           path: release-metadata
-      - name: Create draft public release
+      - name: Verify updater signatures cryptographically
+        shell: bash
         run: |
-          gh release create "v${VERSION}" \
-            --repo "${RELEASE_REPOSITORY}" \
-            --draft \
-            --title "Cockpit Tools v${VERSION} LDXP" \
-            --notes-file release-metadata/release-notes.md || \
-          gh release edit "v${VERSION}" \
-            --repo "${RELEASE_REPOSITORY}" \
-            --draft \
-            --title "Cockpit Tools v${VERSION} LDXP" \
-            --notes-file release-metadata/release-notes.md
-      - name: Upload packages and updater assets
-        run: gh release upload "v${VERSION}" release-assets/* --repo "${RELEASE_REPOSITORY}" --clobber
-      - name: Build updater manifests
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y minisign
+          PUBKEY="$(node -e "const c=require('./src-tauri/tauri.conf.json'); const s=Buffer.from(c.plugins.updater.pubkey,'base64').toString('utf8'); console.log(s.split(/\r?\n/).find(x=>x.startsWith('RW')))" )"
+          test -n "${PUBKEY}"
+          for asset in release-assets/*_x64-setup.exe release-assets/*_x64_en-US.msi release-assets/*_universal.app.tar.gz; do
+            test -s "${asset}"
+            test -s "${asset}.sig"
+            base64 --decode "${asset}.sig" > "${asset}.minisig"
+            minisign -Vm "${asset}" -x "${asset}.minisig" -P "${PUBKEY}"
+            rm "${asset}.minisig"
+          done
+      - name: Build and validate updater manifests locally
+        shell: bash
         run: |
+          set -euo pipefail
           node scripts/release/build_target_latest_json.cjs \
             --version "${VERSION}" \
             --repo "${RELEASE_REPOSITORY}" \
             --assets-dir release-assets \
             --notes-file release-metadata/release-notes.md \
             --published-at "$(cat release-metadata/published-at.txt)" \
-            --targets "windows-x86_64-msi,windows-x86_64-nsis,darwin-universal,darwin-aarch64-app,darwin-x86_64-app" \
+            --targets "${RELEASE_TARGETS}" \
             --output-dir target-manifests
           node scripts/release/build_ldxp_latest_json.cjs \
             --version "${VERSION}" \
             --manifests-dir target-manifests \
             --notes-file release-metadata/release-notes.md \
             --output latest.json
-      - name: Generate checksums and upload manifests
-        run: |
+          node scripts/release/verify_local_release_candidate.cjs \
+            --version "${VERSION}" \
+            --repo "${RELEASE_REPOSITORY}" \
+            --assets-dir release-assets \
+            --manifests-dir target-manifests \
+            --legacy latest.json \
+            --targets "${RELEASE_TARGETS}"
           (
-            cd release-assets
-            find . -maxdepth 1 -type f -printf '%f\n' | sort | xargs -r sha256sum
-          ) > SHA256SUMS.txt
-          gh release upload "v${VERSION}" target-manifests/*.json latest.json SHA256SUMS.txt --repo "${RELEASE_REPOSITORY}" --clobber
-      - name: Publish and verify public update channel
+            for file in release-assets/* target-manifests/*.json latest.json; do
+              sha256sum "${file}"
+            done
+          ) | sed -E 's#  (release-assets/|target-manifests/)#  #' > SHA256SUMS.txt
+          test -s SHA256SUMS.txt
+      - name: Create draft and upload the verified candidate
+        id: draft
+        shell: bash
         run: |
-          gh release edit "v${VERSION}" --repo "${RELEASE_REPOSITORY}" --draft=false --latest
+          set -euo pipefail
+          if gh release view "v${VERSION}" --repo "${RELEASE_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Release v${VERSION} already exists; refusing to overwrite it."
+            exit 1
+          fi
+          gh release create "v${VERSION}" \
+            --repo "${RELEASE_REPOSITORY}" \
+            --draft \
+            --latest=false \
+            --title "Cockpit Tools v${VERSION} (Unofficial Noncommercial Build)" \
+            --notes-file release-metadata/release-notes.md
+          gh release upload "v${VERSION}" \
+            release-assets/* target-manifests/*.json latest.json SHA256SUMS.txt \
+            --repo "${RELEASE_REPOSITORY}"
+          RELEASE_ID="$(gh api "repos/${RELEASE_REPOSITORY}/releases/tags/v${VERSION}" --jq .id)"
+          echo "release_id=${RELEASE_ID}" >> "${GITHUB_OUTPUT}"
+      - name: Verify every draft asset through the GitHub API
+        shell: bash
+        env:
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          mkdir downloaded-assets
+          while IFS=$'\t' read -r asset_id asset_name; do
+            gh api "repos/${RELEASE_REPOSITORY}/releases/assets/${asset_id}" \
+              -H 'Accept: application/octet-stream' > "downloaded-assets/${asset_name}"
+          done < <(gh api "repos/${RELEASE_REPOSITORY}/releases/${RELEASE_ID}/assets" --jq '.[] | [.id,.name] | @tsv')
+          for source in release-assets/* target-manifests/*.json latest.json SHA256SUMS.txt; do
+            name="$(basename "${source}")"
+            test -f "downloaded-assets/${name}"
+            test "$(sha256sum "${source}" | cut -d' ' -f1)" = "$(sha256sum "downloaded-assets/${name}" | cut -d' ' -f1)"
+          done
+      - name: Publish as the new Latest release
+        id: publish_release
+        env:
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method PATCH "repos/${RELEASE_REPOSITORY}/releases/${RELEASE_ID}" \
+            -F draft=false -F prerelease=false -f make_latest=true >/dev/null
+      - name: Verify the public update channel
+        id: online_verify
+        shell: bash
+        run: |
+          set -euo pipefail
           node scripts/release/verify_published_updater_manifests.cjs \
             --version "${VERSION}" \
             --repo "${RELEASE_REPOSITORY}" \
-            --targets "windows-x86_64-msi,windows-x86_64-nsis,darwin-universal,darwin-aarch64-app,darwin-x86_64-app" \
+            --targets "${RELEASE_TARGETS}" \
             --legacy
+      - name: Fast-forward the customized source branch
+        if: ${{ success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git merge-base --is-ancestor origin/main HEAD
+          git push origin HEAD:main
+          if [[ "${GITHUB_REF_NAME}" == automation/candidate-v* ]]; then
+            git push origin --delete "${GITHUB_REF_NAME}" || true
+          fi
+      - name: Restore the previous Latest release after any post-publication failure
+        if: ${{ failure() && steps.publish_release.outcome == 'success' }}
+        shell: bash
+        run: |
+          gh release edit "${PREVIOUS_LATEST_TAG}" --repo "${RELEASE_REPOSITORY}" --latest
+          gh release delete "v${VERSION}" --repo "${RELEASE_REPOSITORY}" --yes --cleanup-tag || true
+      - name: Remove a failed unpublished draft
+        if: ${{ failure() && steps.draft.outcome == 'success' && steps.publish_release.outcome != 'success' }}
+        shell: bash
+        run: |
+          gh release delete "v${VERSION}" --repo "${RELEASE_REPOSITORY}" --yes --cleanup-tag || true

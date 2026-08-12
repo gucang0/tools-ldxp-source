@@ -7775,6 +7775,19 @@ export function SettingsPage() {
               <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
                 {t('settings.about.slogan')}
               </p>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '12px', lineHeight: 1.6 }}>
+                非官方修改版 / Unofficial modified build<br />
+                基于 Cockpit Tools，已移除公告、推广与 Sponsor 内容。源码修改遵循{' '}
+                <button
+                  type="button"
+                  className="btn btn-link"
+                  onClick={() => openLink('https://creativecommons.org/licenses/by-nc-sa/4.0/')}
+                  style={{ minHeight: 0, padding: 0, fontSize: '12px', verticalAlign: 'baseline' }}
+                >
+                  CC BY-NC-SA 4.0
+                </button>
+                。
+              </p>
             </div>
 
             <div className="credits-list">

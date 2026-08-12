@@ -1156,8 +1156,8 @@ function MainApp() {
   }, []);
 
   useEffect(() => {
-    void forceRefreshTopRightAdState();
-  }, [forceRefreshTopRightAdState]);
+    void fetchTopRightAdState();
+  }, [fetchTopRightAdState]);
 
   useEffect(() => {
     let disposed = false;

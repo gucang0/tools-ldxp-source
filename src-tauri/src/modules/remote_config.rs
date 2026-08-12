@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use super::config;
 use super::logger;
 
+const REMOTE_CONFIG_URL: &str =
+    "https://raw.githubusercontent.com/jlcodes99/cockpit-tools/main/remote-config.json";
 const REMOTE_CONFIG_CACHE_FILE: &str = "remote_config_cache.json";
 const REMOTE_CONFIG_LOCAL_OVERRIDE_FILE: &str = "remote-config.local.json";
 const CACHE_TTL_MS: i64 = 3_600_000;
@@ -219,7 +221,31 @@ fn save_cache(payload: &RemoteConfigPayload) -> Result<(), String> {
 }
 
 async fn fetch_remote_config() -> Result<RemoteConfigPayload, String> {
-    Ok(empty_payload())
+    logger::log_info("[RemoteConfig] 从远端拉取配置");
+
+    let client = reqwest::Client::builder()
+        .user_agent("Cockpit-Tools")
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("创建远端配置 HTTP 客户端失败: {}", e))?;
+
+    let url = format!("{}?t={}", REMOTE_CONFIG_URL, Utc::now().timestamp_millis());
+    let response = client
+        .get(url)
+        .header("Cache-Control", "no-cache")
+        .header("Pragma", "no-cache")
+        .send()
+        .await
+        .map_err(|e| format!("拉取远端配置失败: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("远端配置接口返回异常状态: {}", response.status()));
+    }
+
+    response
+        .json()
+        .await
+        .map_err(|e| format!("解析远端配置失败: {}", e))
 }
 
 fn current_os() -> String {
@@ -478,8 +504,44 @@ fn build_state(payload: RemoteConfigPayload, updated_at: i64) -> RemoteConfigSta
 }
 
 async fn load_remote_config_raw(force_refresh: bool) -> Result<(RemoteConfigPayload, i64), String> {
-    let _ = force_refresh;
-    Ok((empty_payload(), Utc::now().timestamp_millis()))
+    if let Some(local_data) = load_local_remote_config()? {
+        return Ok((local_data, Utc::now().timestamp_millis()));
+    }
+
+    let cached = load_cache()?;
+    let cache_is_fresh = cached
+        .as_ref()
+        .map(|cache| Utc::now().timestamp_millis() - cache.time < CACHE_TTL_MS)
+        .unwrap_or(false);
+
+    if !force_refresh {
+        if let Some(cache) = cached.as_ref() {
+            if cache_is_fresh {
+                logger::log_info("[RemoteConfig] 使用本地缓存配置");
+                return Ok((cache.data.clone(), cache.time));
+            }
+        }
+    }
+
+    match fetch_remote_config().await {
+        Ok(payload) => {
+            let updated_at = Utc::now().timestamp_millis();
+            if let Err(err) = save_cache(&payload) {
+                logger::log_warn(&format!("[RemoteConfig] 保存缓存失败: {}", err));
+            }
+            Ok((payload, updated_at))
+        }
+        Err(err) => {
+            logger::log_warn(&format!(
+                "[RemoteConfig] 拉取远端配置失败，尝试回退缓存: {}",
+                err
+            ));
+            if let Some(cache) = cached {
+                return Ok((cache.data, cache.time));
+            }
+            Ok((empty_payload(), Utc::now().timestamp_millis()))
+        }
+    }
 }
 
 pub async fn get_remote_config_state() -> Result<RemoteConfigState, String> {

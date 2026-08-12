@@ -184,30 +184,11 @@ fn default_target_versions() -> String {
 }
 
 fn controlled_announcement_response() -> AnnouncementResponse {
-    let ad = TopRightAd {
-        id: "ldxp-promotion".to_string(),
-        priority: 0,
-        text: "低价gpt plus成品号。850r plus年卡代充全程质保，各种AI账号的代充值均在小铺中.联系qq 854760178下单".to_string(),
-        badge: Some("推广".to_string()),
-        cta_label: None,
-        cta_url: Some("https://pay.ldxp.cn/shop/FPS8MBSL".to_string()),
-        display_mode: None,
-        display_pages: None,
-        display_platforms: None,
-        exclude_pages: None,
-        exclude_platforms: None,
-        target_versions: default_target_versions(),
-        target_languages: None,
-        created_at: String::new(),
-        expires_at: None,
-        locales: None,
-    };
-
     AnnouncementResponse {
-        version: "ldxp".to_string(),
+        version: "noncommercial".to_string(),
         announcements: Vec::new(),
-        top_right_ad: Some(ad.clone()),
-        top_right_ads: vec![ad],
+        top_right_ad: None,
+        top_right_ads: Vec::new(),
     }
 }
 
@@ -644,37 +625,18 @@ async fn load_announcements_raw() -> Result<AnnouncementResponse, String> {
 }
 
 pub async fn get_announcement_state() -> Result<AnnouncementState, String> {
-    let current_version = env!("CARGO_PKG_VERSION");
-    let locale = config::get_user_config().language.to_lowercase();
-    let raw_payload = load_announcements_raw().await?;
-    let announcements = filter_announcements(raw_payload.announcements, current_version, &locale);
-    let read_ids = get_read_ids()?;
-
-    let unread_ids: Vec<String> = announcements
-        .iter()
-        .filter(|item| !read_ids.contains(&item.id))
-        .map(|item| item.id.clone())
-        .collect();
-
-    let popup_announcement = announcements
-        .iter()
-        .find(|item| item.popup && !read_ids.contains(&item.id))
-        .cloned();
-
     Ok(AnnouncementState {
-        announcements,
-        unread_ids,
-        popup_announcement,
+        announcements: Vec::new(),
+        unread_ids: Vec::new(),
+        popup_announcement: None,
     })
 }
 
 pub async fn get_top_right_ad_state() -> Result<TopRightAdState, String> {
-    let current_version = env!("CARGO_PKG_VERSION");
-    let locale = config::get_user_config().language.to_lowercase();
-    let raw_payload = load_announcements_raw().await?;
-    let ad = filter_top_right_ad(raw_payload.top_right_ad, current_version, &locale);
-    let ads = filter_top_right_ads(raw_payload.top_right_ads, current_version, &locale);
-    Ok(TopRightAdState { ad, ads })
+    Ok(TopRightAdState {
+        ad: None,
+        ads: Vec::new(),
+    })
 }
 
 pub async fn mark_announcement_as_read(id: &str) -> Result<(), String> {
@@ -687,12 +649,7 @@ pub async fn mark_announcement_as_read(id: &str) -> Result<(), String> {
 }
 
 pub async fn mark_all_announcements_as_read() -> Result<(), String> {
-    let current_version = env!("CARGO_PKG_VERSION");
-    let locale = config::get_user_config().language.to_lowercase();
-    let raw_payload = load_announcements_raw().await?;
-    let announcements = filter_announcements(raw_payload.announcements, current_version, &locale);
-    let ids: Vec<String> = announcements.iter().map(|item| item.id.clone()).collect();
-    save_read_ids(&ids)
+    save_read_ids(&Vec::new())
 }
 
 pub async fn force_refresh_top_right_ad() -> Result<TopRightAdState, String> {

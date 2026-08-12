@@ -1,0 +1,169 @@
+name: Check Official Release Every Three Days
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      force_check:
+        description: Ignore the 72-hour interval gate
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: noncommercial-upstream-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPOSITORY: jlcodes99/cockpit-tools
+  RELEASE_REPOSITORY: gucang0/tools
+  CHECK_INTERVAL_SECONDS: '259200'
+
+jobs:
+  check-and-prepare:
+    name: Detect and prepare a guarded candidate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.LDXP_RELEASE_TOKEN }}
+      - name: Enforce one official check per 72 hours
+        id: interval
+        env:
+          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
+          FORCE_CHECK: ${{ inputs.force_check || false }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          NOW="$(date +%s)"
+          LAST="$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LDXP_LAST_UPSTREAM_CHECK_EPOCH" --jq .value 2>/dev/null || true)"
+          if [[ "${FORCE_CHECK}" != "true" && "${LAST}" =~ ^[0-9]+$ && $((NOW - LAST)) -lt ${CHECK_INTERVAL_SECONDS} ]]; then
+            echo "Official release check is not due yet."
+            echo "due=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          if [[ "${LAST}" =~ ^[0-9]+$ ]]; then
+            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/LDXP_LAST_UPSTREAM_CHECK_EPOCH" -f name=LDXP_LAST_UPSTREAM_CHECK_EPOCH -f value="${NOW}" >/dev/null
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/variables" -f name=LDXP_LAST_UPSTREAM_CHECK_EPOCH -f value="${NOW}" >/dev/null
+          fi
+          echo "due=true" >> "${GITHUB_OUTPUT}"
+      - name: Read the latest stable official release
+        if: ${{ steps.interval.outputs.due == 'true' }}
+        id: upstream
+        env:
+          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE="$(gh api "repos/${UPSTREAM_REPOSITORY}/releases/latest")"
+          TAG="$(jq -r .tag_name <<<"${RELEASE}")"
+          DRAFT="$(jq -r .draft <<<"${RELEASE}")"
+          PRERELEASE="$(jq -r .prerelease <<<"${RELEASE}")"
+          [[ "${TAG}" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]
+          test "${DRAFT}" = false
+          test "${PRERELEASE}" = false
+          VERSION="${BASH_REMATCH[1]}"
+          CURRENT_VERSION="$(node -p "require('./package.json').version")"
+          IS_NEWER="$(node -e '
+            const [candidate,current]=process.argv.slice(1).map(v=>v.split(".").map(Number));
+            const newer=candidate.some((part,index)=>part>current[index] && candidate.slice(0,index).every((value,i)=>value===current[i]));
+            process.stdout.write(String(newer));
+          ' "${VERSION}" "${CURRENT_VERSION}")"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "newer=${IS_NEWER}" >> "${GITHUB_OUTPUT}"
+          echo "Official latest: ${TAG}; customized source: v${CURRENT_VERSION}; newer=${IS_NEWER}"
+      - name: Stop when there is no new official version
+        if: ${{ steps.interval.outputs.due == 'true' && steps.upstream.outputs.newer != 'true' }}
+        run: echo 'No new stable official Cockpit Tools release.'
+      - name: Fetch and verify the exact official tag
+        if: ${{ steps.interval.outputs.due == 'true' && steps.upstream.outputs.newer == 'true' }}
+        id: source
+        env:
+          VERSION: ${{ steps.upstream.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git" 2>/dev/null || true
+          git fetch --force upstream "refs/tags/v${VERSION}:refs/tags/upstream-v${VERSION}"
+          COMMIT="$(git rev-parse "upstream-v${VERSION}^{commit}")"
+          PACKAGE_VERSION="$(git show "upstream-v${VERSION}:package.json" | jq -r .version)"
+          TAURI_VERSION="$(git show "upstream-v${VERSION}:src-tauri/tauri.conf.json" | jq -r .version)"
+          CARGO_VERSION="$(git show "upstream-v${VERSION}:src-tauri/Cargo.toml" | sed -n 's/^version = "\([^"]*\)"/\1/p' | head -n1)"
+          test "${PACKAGE_VERSION}" = "${VERSION}"
+          test "${TAURI_VERSION}" = "${VERSION}"
+          test "${CARGO_VERSION}" = "${VERSION}"
+          echo "commit=${COMMIT}" >> "${GITHUB_OUTPUT}"
+      - name: Verify the official Windows x64 release asset exists
+        if: ${{ steps.interval.outputs.due == 'true' && steps.upstream.outputs.newer == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
+          VERSION: ${{ steps.upstream.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXPECTED="Cockpit.Tools_${VERSION}_x64-setup.exe"
+          ASSET_COUNT="$(gh api "repos/${UPSTREAM_REPOSITORY}/releases/tags/v${VERSION}" --jq "[.assets[] | select(.name == \"${EXPECTED}\")] | length")"
+          test "${ASSET_COUNT}" = 1
+      - name: Prepare a clean merge candidate
+        if: ${{ steps.interval.outputs.due == 'true' && steps.upstream.outputs.newer == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
+          VERSION: ${{ steps.upstream.outputs.version }}
+          UPSTREAM_COMMIT: ${{ steps.source.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BRANCH="automation/candidate-v${VERSION}"
+          if git ls-remote --exit-code --heads origin "refs/heads/${BRANCH}" >/dev/null 2>&1; then
+            echo "Candidate branch ${BRANCH} already exists. Resolve or delete it before retrying."
+            exit 1
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git switch -c "${BRANCH}"
+          set +e
+          git merge --no-ff --no-commit "upstream-v${VERSION}"
+          MERGE_STATUS=$?
+          set -e
+          if [ ${MERGE_STATUS} -ne 0 ]; then
+            mapfile -t CONFLICTS < <(git diff --name-only --diff-filter=U)
+            if [ "${#CONFLICTS[@]}" -eq 1 ] && [ "${CONFLICTS[0]}" = ".github/workflows/release.yml" ]; then
+              git rm --force .github/workflows/release.yml
+            else
+              printf 'Merge conflicts block publication:\n%s\n' "${CONFLICTS[@]}"
+              exit 1
+            fi
+          fi
+          test -z "$(git diff --name-only --diff-filter=U)"
+          node scripts/release/update_upstream_baseline.cjs --version "${VERSION}" --commit "${UPSTREAM_COMMIT}"
+          node scripts/release/validate_noncommercial_customization.cjs --version "${VERSION}"
+          git diff --name-only "upstream-v${VERSION}" | sort -u > actual-diff.txt
+          sort -u .github/ldxp-customization-allowlist.txt > allowed-diff.txt
+          comm -23 actual-diff.txt allowed-diff.txt > unexpected-diff.txt
+          if [ -s unexpected-diff.txt ]; then
+            echo 'Unexpected customization outside the allowlist:'
+            cat unexpected-diff.txt
+            exit 1
+          fi
+          git add --all
+          git commit -m "feat: sync noncommercial build with Cockpit Tools v${VERSION}"
+          git push origin "HEAD:refs/heads/${BRANCH}"
+      - name: Dispatch the strict build and automatic publication
+        if: ${{ steps.interval.outputs.due == 'true' && steps.upstream.outputs.newer == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
+          VERSION: ${{ steps.upstream.outputs.version }}
+          UPSTREAM_COMMIT: ${{ steps.source.outputs.commit }}
+        shell: bash
+        run: |
+          gh workflow run ldxp-release.yml \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref "automation/candidate-v${VERSION}" \
+            -f version="${VERSION}" \
+            -f upstream_commit="${UPSTREAM_COMMIT}" \
+            -f publish=true
