@@ -347,17 +347,25 @@ jobs:
             echo "Release v${VERSION} already exists; refusing to overwrite it."
             exit 1
           fi
+          cleanup_failed_draft() {
+            gh release delete "v${VERSION}" \
+              --repo "${RELEASE_REPOSITORY}" \
+              --yes \
+              --cleanup-tag || true
+          }
+          trap cleanup_failed_draft ERR
           gh release create "v${VERSION}" \
             --repo "${RELEASE_REPOSITORY}" \
             --draft \
             --latest=false \
             --title "Cockpit Tools v${VERSION} (Unofficial Noncommercial Build)" \
             --notes-file release-metadata/release-notes.md
+          RELEASE_ID="$(gh api "repos/${RELEASE_REPOSITORY}/releases/tags/v${VERSION}" --jq .id)"
+          echo "release_id=${RELEASE_ID}" >> "${GITHUB_OUTPUT}"
           gh release upload "v${VERSION}" \
             release-assets/* target-manifests/*.json latest.json SHA256SUMS.txt \
             --repo "${RELEASE_REPOSITORY}"
-          RELEASE_ID="$(gh api "repos/${RELEASE_REPOSITORY}/releases/tags/v${VERSION}" --jq .id)"
-          echo "release_id=${RELEASE_ID}" >> "${GITHUB_OUTPUT}"
+          trap - ERR
       - name: Verify every draft asset through the GitHub API
         shell: bash
         env:
