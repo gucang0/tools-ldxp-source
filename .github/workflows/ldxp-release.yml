@@ -355,11 +355,10 @@ jobs:
             jq -n \
               --arg tag "v${VERSION}" \
               --arg name "Cockpit Tools v${VERSION}" \
-              --arg target "${GITHUB_SHA}" \
               --rawfile body release-metadata/release-notes.md \
               '{
                 tag_name: $tag,
-                target_commitish: $target,
+                target_commitish: "main",
                 name: $name,
                 body: $body,
                 draft: true,
