@@ -387,12 +387,18 @@ jobs:
           for source in release-assets/* target-manifests/*.json latest.json SHA256SUMS.txt; do
             name="$(basename "${source}")"
             encoded_name="$(jq -rn --arg value "${name}" '$value | @uri')"
-            gh api \
-              --hostname uploads.github.com \
-              --method POST \
-              "repos/${RELEASE_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${encoded_name}" \
+            curl \
+              --fail-with-body \
+              --retry 5 \
+              --retry-delay 2 \
+              --retry-all-errors \
+              --request POST \
+              --url "https://uploads.github.com/repos/${RELEASE_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${encoded_name}" \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
               -H 'Content-Type: application/octet-stream' \
-              --input "${source}" \
+              --data-binary "@${source}" \
               >/dev/null
           done
           trap - ERR
