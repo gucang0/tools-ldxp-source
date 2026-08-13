@@ -154,12 +154,15 @@ jobs:
           test -z "$(git diff --name-only --diff-filter=U)"
           node scripts/release/update_upstream_baseline.cjs --version "${VERSION}" --commit "${UPSTREAM_COMMIT}"
           node scripts/release/validate_noncommercial_customization.cjs --version "${VERSION}"
-          git diff --name-only "upstream-v${VERSION}" | sort -u > actual-diff.txt
-          sort -u .github/ldxp-customization-allowlist.txt > allowed-diff.txt
-          comm -23 actual-diff.txt allowed-diff.txt > unexpected-diff.txt
-          if [ -s unexpected-diff.txt ]; then
+          ACTUAL_DIFF="${RUNNER_TEMP}/actual-diff.txt"
+          ALLOWED_DIFF="${RUNNER_TEMP}/allowed-diff.txt"
+          UNEXPECTED_DIFF="${RUNNER_TEMP}/unexpected-diff.txt"
+          git diff --name-only "upstream-v${VERSION}" | sort -u > "${ACTUAL_DIFF}"
+          sort -u .github/ldxp-customization-allowlist.txt > "${ALLOWED_DIFF}"
+          comm -23 "${ACTUAL_DIFF}" "${ALLOWED_DIFF}" > "${UNEXPECTED_DIFF}"
+          if [ -s "${UNEXPECTED_DIFF}" ]; then
             echo 'Unexpected customization outside the allowlist:'
-            cat unexpected-diff.txt
+            cat "${UNEXPECTED_DIFF}"
             exit 1
           fi
           git add --all
