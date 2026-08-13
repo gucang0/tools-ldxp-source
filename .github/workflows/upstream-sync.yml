@@ -24,12 +24,15 @@ jobs:
   check-and-prepare:
     name: Detect and prepare a guarded candidate
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ secrets.LDXP_RELEASE_TOKEN }}
+          token: ${{ github.token }}
       - name: Enforce one official check per 72 hours
         id: interval
         env:
@@ -64,7 +67,7 @@ jobs:
         if: ${{ steps.interval.outputs.due == 'true' }}
         id: upstream
         env:
-          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -110,7 +113,7 @@ jobs:
       - name: Verify the official Windows x64 release asset exists
         if: ${{ steps.interval.outputs.due == 'true' && steps.upstream.outputs.newer == 'true' }}
         env:
-          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.upstream.outputs.version }}
         shell: bash
         run: |
@@ -121,7 +124,7 @@ jobs:
       - name: Prepare a clean merge candidate
         if: ${{ steps.interval.outputs.due == 'true' && steps.upstream.outputs.newer == 'true' }}
         env:
-          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.upstream.outputs.version }}
           UPSTREAM_COMMIT: ${{ steps.source.outputs.commit }}
         shell: bash
@@ -165,7 +168,7 @@ jobs:
       - name: Dispatch the strict build and automatic publication
         if: ${{ steps.interval.outputs.due == 'true' && steps.upstream.outputs.newer == 'true' }}
         env:
-          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.upstream.outputs.version }}
           UPSTREAM_COMMIT: ${{ steps.source.outputs.commit }}
         shell: bash
