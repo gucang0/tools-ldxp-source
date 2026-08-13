@@ -18,7 +18,7 @@ concurrency:
 env:
   UPSTREAM_REPOSITORY: jlcodes99/cockpit-tools
   RELEASE_REPOSITORY: gucang0/tools
-  CHECK_INTERVAL_SECONDS: '259200'
+  CHECK_ANCHOR_DATE: '2026-08-13'
 
 jobs:
   check-and-prepare:
@@ -33,23 +33,32 @@ jobs:
       - name: Enforce one official check per 72 hours
         id: interval
         env:
-          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
           FORCE_CHECK: ${{ inputs.force_check || false }}
         shell: bash
         run: |
           set -euo pipefail
-          NOW="$(date +%s)"
-          LAST="$(gh api "repos/${GITHUB_REPOSITORY}/actions/variables/LDXP_LAST_UPSTREAM_CHECK_EPOCH" --jq .value 2>/dev/null || true)"
-          if [[ "${FORCE_CHECK}" != "true" && "${LAST}" =~ ^[0-9]+$ && $((NOW - LAST)) -lt ${CHECK_INTERVAL_SECONDS} ]]; then
-            echo "Official release check is not due yet."
+          if [[ "${FORCE_CHECK}" == "true" ]]; then
+            echo "Manual dispatch requested an immediate official release check."
+            echo "due=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          TODAY_EPOCH="$(date -u -d "$(date -u +%F)" +%s)"
+          ANCHOR_EPOCH="$(date -u -d "${CHECK_ANCHOR_DATE}" +%s)"
+          if (( TODAY_EPOCH < ANCHOR_EPOCH )); then
+            echo "The three-day check schedule has not reached its anchor date."
             echo "due=false" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
-          if [[ "${LAST}" =~ ^[0-9]+$ ]]; then
-            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/actions/variables/LDXP_LAST_UPSTREAM_CHECK_EPOCH" -f name=LDXP_LAST_UPSTREAM_CHECK_EPOCH -f value="${NOW}" >/dev/null
-          else
-            gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/variables" -f name=LDXP_LAST_UPSTREAM_CHECK_EPOCH -f value="${NOW}" >/dev/null
+
+          ELAPSED_DAYS=$(( (TODAY_EPOCH - ANCHOR_EPOCH) / 86400 ))
+          if (( ELAPSED_DAYS % 3 != 0 )); then
+            echo "Official release check is not due today."
+            echo "due=false" >> "${GITHUB_OUTPUT}"
+            exit 0
           fi
+
+          echo "Official release check is due today."
           echo "due=true" >> "${GITHUB_OUTPUT}"
       - name: Read the latest stable official release
         if: ${{ steps.interval.outputs.due == 'true' }}

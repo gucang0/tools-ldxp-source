@@ -246,7 +246,7 @@ jobs:
           APP="target/universal-apple-darwin/release/bundle/macos/Cockpit Tools.app"
           BINARY="${APP}/Contents/MacOS/cockpit-tools"
           test -f "${BINARY}"
-          lipo -verify_arch x86_64 arm64 "${BINARY}"
+          lipo "${BINARY}" -verify_arch x86_64 arm64
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${APP}/Contents/Info.plist")" = "${EXPECTED_VERSION}"
           codesign --display --verbose=2 "${APP}" || true
       - name: Stage and validate macOS release assets
