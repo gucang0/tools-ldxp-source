@@ -28,7 +28,7 @@ test('validates Windows, Universal macOS, and legacy updater mappings', () => {
   ];
 
   fs.mkdirSync(assetsDir);
-  fs.writeFileSync(notesFile, 'Unofficial noncommercial build');
+  fs.writeFileSync(notesFile, 'Cockpit Tools release');
   for (const asset of assets) {
     fs.writeFileSync(path.join(assetsDir, asset), `payload-${asset}`);
     fs.writeFileSync(path.join(assetsDir, `${asset}.sig`), `signature-${asset}`);

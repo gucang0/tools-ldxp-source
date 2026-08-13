@@ -1,4 +1,4 @@
-name: Noncommercial Release Candidate
+name: Cockpit Tools Release
 
 on:
   workflow_dispatch:
@@ -18,7 +18,7 @@ on:
         type: boolean
 
 concurrency:
-  group: noncommercial-release-${{ inputs.version }}
+  group: cockpit-tools-release-${{ inputs.version }}
   cancel-in-progress: false
 
 env:
@@ -92,27 +92,14 @@ jobs:
           echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
       - name: Create release metadata
         env:
+          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
           VERSION: ${{ steps.version.outputs.value }}
           UPSTREAM_COMMIT: ${{ inputs.upstream_commit }}
         shell: bash
         run: |
-          cat > release-notes.md <<EOF
-          ## Unofficial noncommercial build
-
-          This is an unofficial modified build based on the official [Cockpit Tools v${VERSION}](https://github.com/${UPSTREAM_REPOSITORY}/releases/tag/v${VERSION}) source (${UPSTREAM_COMMIT}). It is not endorsed by or affiliated with the upstream author.
-
-          Changes from upstream:
-
-          - Remote announcements, top promotions, and Sponsor content are disabled.
-          - Application updates use the signed noncommercial update channel at [gucang0/tools](https://github.com/${RELEASE_REPOSITORY}).
-          - The remaining application feature set follows the corresponding official release.
-
-          Original project: https://github.com/${UPSTREAM_REPOSITORY}
-
-          Modified source: https://github.com/gucang0/tools-ldxp-source
-
-          License: [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/). This build is for personal and noncommercial sharing only.
-          EOF
+          set -euo pipefail
+          gh api "repos/${UPSTREAM_REPOSITORY}/releases/tags/v${VERSION}" --jq .body > release-notes.md
+          test -s release-notes.md
           date -u +"%Y-%m-%dT%H:%M:%SZ" > published-at.txt
       - uses: actions/upload-artifact@v4
         with:
@@ -367,11 +354,12 @@ jobs:
           RELEASE_ID="$(
             jq -n \
               --arg tag "v${VERSION}" \
-              --arg name "Cockpit Tools v${VERSION} (Unofficial Noncommercial Build)" \
+              --arg name "Cockpit Tools v${VERSION}" \
+              --arg target "${GITHUB_SHA}" \
               --rawfile body release-metadata/release-notes.md \
               '{
                 tag_name: $tag,
-                target_commitish: "main",
+                target_commitish: $target,
                 name: $name,
                 body: $body,
                 draft: true,

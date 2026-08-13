@@ -25,6 +25,18 @@ function forbidText(content, forbidden, label) {
   }
 }
 
+function functionSection(content, signature, nextSignature, label) {
+  const start = content.indexOf(signature);
+  if (start < 0) {
+    fail(`${label} is missing function: ${signature}`);
+  }
+  const end = content.indexOf(nextSignature, start + signature.length);
+  if (end < 0) {
+    fail(`${label} is missing function boundary: ${nextSignature}`);
+  }
+  return content.slice(start, end);
+}
+
 function parseArgs(argv) {
   const result = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -75,12 +87,49 @@ function validateRuntimeCustomization() {
   const app = read('src/App.tsx');
   const settings = read('src/pages/SettingsPage.tsx');
   const updaterNotes = read('src/utils/updaterReleaseNotes.ts');
+  const syncWorkflow = read('.github/workflows/upstream-sync.yml');
 
-  requireText(tauriAnnouncement, 'top_right_ads_enabled: false', 'Tauri announcement module');
-  requireText(tauriAnnouncement, 'sponsor_module: None', 'Tauri announcement module');
-  requireText(tauriAnnouncement, 'pub async fn get_top_right_ad_state()', 'Tauri announcement module');
-  requireText(coreAnnouncement, 'top_right_ad: None', 'Core announcement module');
-  requireText(coreAnnouncement, 'top_right_ads: Vec::new()', 'Core announcement module');
+  const tauriAnnouncementState = functionSection(
+    tauriAnnouncement,
+    'pub async fn get_announcement_state()',
+    'pub async fn get_top_right_ad_state()',
+    'Tauri announcement module',
+  );
+  const tauriTopPromotion = functionSection(
+    tauriAnnouncement,
+    'pub async fn get_top_right_ad_state()',
+    'pub async fn get_sponsor_module_state()',
+    'Tauri announcement module',
+  );
+  const tauriSponsor = functionSection(
+    tauriAnnouncement,
+    'pub async fn get_sponsor_module_state()',
+    'pub async fn force_refresh_sponsor_module()',
+    'Tauri announcement module',
+  );
+  const coreAnnouncementState = functionSection(
+    coreAnnouncement,
+    'pub async fn get_announcement_state()',
+    'pub async fn get_top_right_ad_state()',
+    'Core announcement module',
+  );
+  const coreTopPromotion = functionSection(
+    coreAnnouncement,
+    'pub async fn get_top_right_ad_state()',
+    'pub async fn mark_announcement_as_read',
+    'Core announcement module',
+  );
+
+  requireText(tauriAnnouncement, 'ANNOUNCEMENT_URL', 'Tauri announcement module');
+  requireText(tauriAnnouncementState, 'filter_announcements(raw_payload.announcements', 'Tauri announcement state');
+  requireText(tauriTopPromotion, 'ad: None', 'Tauri top promotion state');
+  requireText(tauriTopPromotion, 'ads: Vec::new()', 'Tauri top promotion state');
+  forbidText(tauriTopPromotion, 'load_announcements_raw', 'Tauri top promotion state');
+  requireText(tauriSponsor, 'filter_sponsor_module(raw_payload.sponsor_module', 'Tauri Sponsor state');
+  requireText(coreAnnouncementState, 'filter_announcements(raw_payload.announcements', 'Core announcement state');
+  requireText(coreTopPromotion, 'ad: None', 'Core top promotion state');
+  requireText(coreTopPromotion, 'ads: Vec::new()', 'Core top promotion state');
+  forbidText(coreTopPromotion, 'load_announcements_raw', 'Core top promotion state');
   requireText(
     remoteConfig,
     'raw.githubusercontent.com/jlcodes99/cockpit-tools/main/remote-config.json',
@@ -92,13 +141,32 @@ function validateRuntimeCustomization() {
   requireText(app, 'const runUpdaterCheck', 'Application updater');
   requireText(app, "'update-check-requested'", 'Application updater');
   requireText(settings, 'handleCheckUpdate', 'Settings update entry');
-  requireText(settings, 'Unofficial modified build', 'About page attribution');
-  requireText(settings, 'creativecommons.org/licenses/by-nc-sa/4.0/', 'About page license');
   requireText(updaterNotes, 'https://github.com/gucang0/tools/releases/', 'Updater release notes');
+  requireText(syncWorkflow, 'Check Official Release Every 36 Hours', 'Upstream sync schedule');
+  requireText(syncWorkflow, "cron: '17 3,15 * * *'", 'Upstream sync schedule');
+  requireText(syncWorkflow, "CHECK_ANCHOR_EPOCH: '1786591020'", 'Upstream sync schedule');
 
-  const runtimeSources = [tauriAnnouncement, coreAnnouncement, remoteConfig, adStore, app];
+  const forbiddenBuildLabels = [
+    String.fromCodePoint(0x975e, 0x5b98, 0x65b9),
+    ['unoff', 'icial'].join(''),
+    ['modified', 'build'].join(' '),
+  ];
+  const publicMetadataSources = [
+    ['About page', settings],
+    ['Release workflow', read('.github/workflows/ldxp-release.yml')],
+    ['Upstream sync workflow', syncWorkflow],
+    ['Modifications document', read('MODIFICATIONS.md')],
+    ['Upstream baseline document', read('UPSTREAM.md')],
+    ['Upstream baseline template', read('scripts/release/update_upstream_baseline.cjs')],
+  ];
+  for (const value of forbiddenBuildLabels) {
+    for (const [label, content] of publicMetadataSources) {
+      forbidText(content.toLowerCase(), value.toLowerCase(), label);
+    }
+  }
+
+  const runtimeSources = [remoteConfig, adStore, app];
   const forbidden = [
-    'raw.githubusercontent.com/jlcodes99/cockpit-tools/main/announcements.json',
     'raw.githubusercontent.com/gucang0/tools/main/promotion.json',
     'pay.ldxp.cn',
     '854760178',

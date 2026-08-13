@@ -16,8 +16,5 @@ src-tauri/src/lib.rs
 src-tauri/src/modules/announcement.rs
 src-tauri/src/modules/linux_updater.rs
 src-tauri/tauri.conf.json
-src/pages/SettingsPage.tsx
-src/components/codebuddy-suite/WorkbuddyAutoCheckinConfigModal.tsx
 src/stores/useTopRightAdStore.ts
-src/styles/pages/codebuddy.css
 src/utils/updaterReleaseNotes.ts

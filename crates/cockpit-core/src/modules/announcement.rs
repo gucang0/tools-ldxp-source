@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use super::config;
 use super::logger;
 
+const ANNOUNCEMENT_URL: &str =
+    "https://raw.githubusercontent.com/jlcodes99/cockpit-tools/main/announcements.json";
 const ANNOUNCEMENT_CACHE_FILE: &str = "announcement_cache.json";
 const ANNOUNCEMENT_READ_IDS_FILE: &str = "announcement_read_ids.json";
 const ANNOUNCEMENT_LOCAL_OVERRIDE_FILE: &str = "announcements.local.json";
@@ -181,15 +183,6 @@ pub struct TopRightAdState {
 
 fn default_target_versions() -> String {
     "*".to_string()
-}
-
-fn controlled_announcement_response() -> AnnouncementResponse {
-    AnnouncementResponse {
-        version: "noncommercial".to_string(),
-        announcements: Vec::new(),
-        top_right_ad: None,
-        top_right_ads: Vec::new(),
-    }
 }
 
 fn get_shared_dir() -> Result<PathBuf, String> {
@@ -617,18 +610,89 @@ fn filter_top_right_ads(
 }
 
 async fn fetch_remote_announcements() -> Result<AnnouncementResponse, String> {
-    Ok(controlled_announcement_response())
+    logger::log_info("[Announcement] 从远端拉取公告");
+
+    let client = reqwest::Client::builder()
+        .user_agent("Cockpit-Tools")
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("创建公告 HTTP 客户端失败: {}", e))?;
+
+    let url = format!("{}?t={}", ANNOUNCEMENT_URL, Utc::now().timestamp_millis());
+
+    let response = client
+        .get(url)
+        .header("Cache-Control", "no-cache")
+        .header("Pragma", "no-cache")
+        .send()
+        .await
+        .map_err(|e| format!("拉取远端公告失败: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("远端公告接口返回异常状态: {}", response.status()));
+    }
+
+    response
+        .json()
+        .await
+        .map_err(|e| format!("解析远端公告失败: {}", e))
 }
 
 async fn load_announcements_raw() -> Result<AnnouncementResponse, String> {
-    Ok(controlled_announcement_response())
+    if let Some(local_data) = load_local_announcements()? {
+        return Ok(local_data);
+    }
+
+    if let Some(cache) = load_cache()? {
+        let age_ms = Utc::now().timestamp_millis() - cache.time;
+        if age_ms < CACHE_TTL_MS {
+            logger::log_info("[Announcement] 使用本地缓存公告");
+            return Ok(cache.data);
+        }
+    }
+
+    match fetch_remote_announcements().await {
+        Ok(payload) => {
+            if let Err(err) = save_cache(&payload) {
+                logger::log_warn(&format!("[Announcement] 保存公告缓存失败: {}", err));
+            }
+            Ok(payload)
+        }
+        Err(err) => {
+            logger::log_warn(&format!(
+                "[Announcement] 拉取远端公告失败，尝试回退缓存: {}",
+                err
+            ));
+            if let Some(cache) = load_cache()? {
+                return Ok(cache.data);
+            }
+            Err(err)
+        }
+    }
 }
 
 pub async fn get_announcement_state() -> Result<AnnouncementState, String> {
+    let current_version = env!("CARGO_PKG_VERSION");
+    let locale = config::get_user_config().language.to_lowercase();
+    let raw_payload = load_announcements_raw().await?;
+    let announcements = filter_announcements(raw_payload.announcements, current_version, &locale);
+    let read_ids = get_read_ids()?;
+
+    let unread_ids: Vec<String> = announcements
+        .iter()
+        .filter(|item| !read_ids.contains(&item.id))
+        .map(|item| item.id.clone())
+        .collect();
+
+    let popup_announcement = announcements
+        .iter()
+        .find(|item| item.popup && !read_ids.contains(&item.id))
+        .cloned();
+
     Ok(AnnouncementState {
-        announcements: Vec::new(),
-        unread_ids: Vec::new(),
-        popup_announcement: None,
+        announcements,
+        unread_ids,
+        popup_announcement,
     })
 }
 
@@ -649,7 +713,12 @@ pub async fn mark_announcement_as_read(id: &str) -> Result<(), String> {
 }
 
 pub async fn mark_all_announcements_as_read() -> Result<(), String> {
-    save_read_ids(&Vec::new())
+    let current_version = env!("CARGO_PKG_VERSION");
+    let locale = config::get_user_config().language.to_lowercase();
+    let raw_payload = load_announcements_raw().await?;
+    let announcements = filter_announcements(raw_payload.announcements, current_version, &locale);
+    let ids: Vec<String> = announcements.iter().map(|item| item.id.clone()).collect();
+    save_read_ids(&ids)
 }
 
 pub async fn force_refresh_top_right_ad() -> Result<TopRightAdState, String> {

@@ -1,24 +1,24 @@
-name: Check Official Release Every Three Days
+name: Check Official Release Every 36 Hours
 
 on:
   schedule:
-    - cron: '17 3 * * *'
+    - cron: '17 3,15 * * *'
   workflow_dispatch:
     inputs:
       force_check:
-        description: Ignore the 72-hour interval gate
+        description: Ignore the 36-hour interval gate
         required: true
         default: true
         type: boolean
 
 concurrency:
-  group: noncommercial-upstream-sync
+  group: upstream-sync
   cancel-in-progress: false
 
 env:
   UPSTREAM_REPOSITORY: jlcodes99/cockpit-tools
   RELEASE_REPOSITORY: gucang0/tools
-  CHECK_ANCHOR_DATE: '2026-08-13'
+  CHECK_ANCHOR_EPOCH: '1786591020'
 
 jobs:
   check-and-prepare:
@@ -33,7 +33,7 @@ jobs:
           ref: main
           fetch-depth: 0
           token: ${{ github.token }}
-      - name: Enforce one official check per 72 hours
+      - name: Enforce one official check per 36 hours
         id: interval
         env:
           FORCE_CHECK: ${{ inputs.force_check || false }}
@@ -46,17 +46,16 @@ jobs:
             exit 0
           fi
 
-          TODAY_EPOCH="$(date -u -d "$(date -u +%F)" +%s)"
-          ANCHOR_EPOCH="$(date -u -d "${CHECK_ANCHOR_DATE}" +%s)"
-          if (( TODAY_EPOCH < ANCHOR_EPOCH )); then
-            echo "The three-day check schedule has not reached its anchor date."
+          NOW_EPOCH="$(date -u +%s)"
+          if (( NOW_EPOCH < CHECK_ANCHOR_EPOCH )); then
+            echo "The 36-hour check schedule has not reached its anchor time."
             echo "due=false" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
-          ELAPSED_DAYS=$(( (TODAY_EPOCH - ANCHOR_EPOCH) / 86400 ))
-          if (( ELAPSED_DAYS % 3 != 0 )); then
-            echo "Official release check is not due today."
+          ELAPSED_TWELVE_HOUR_SLOTS=$(( (NOW_EPOCH - CHECK_ANCHOR_EPOCH) / 43200 ))
+          if (( ELAPSED_TWELVE_HOUR_SLOTS % 3 != 0 )); then
+            echo "Official release check is not due in this 12-hour slot."
             echo "due=false" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
@@ -166,7 +165,7 @@ jobs:
             exit 1
           fi
           git add --all
-          git commit -m "feat: sync noncommercial build with Cockpit Tools v${VERSION}"
+          git commit -m "feat: sync customization with Cockpit Tools v${VERSION}"
           git push origin "HEAD:refs/heads/${BRANCH}"
       - name: Dispatch the strict build and automatic publication
         if: ${{ steps.interval.outputs.due == 'true' && steps.upstream.outputs.newer == 'true' }}
