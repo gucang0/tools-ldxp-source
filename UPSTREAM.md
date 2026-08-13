@@ -1,11 +1,11 @@
 # Upstream Baseline
 
 This noncommercial, unofficial build is based on the official Cockpit Tools
-1.3.16 release source.
+1.3.17 release source.
 
 - Upstream repository: https://github.com/jlcodes99/cockpit-tools
-- Upstream tag: `v1.3.16`
-- Verified source commit: `e1ef55ce9f158dd1ee9fd682cf8d9aa1b79601e8`
+- Upstream tag: `v1.3.17`
+- Verified source commit: `a0870c5cd4e7c1adf885575aea8d1c3b57862407`
 - License: CC BY-NC-SA 4.0
 
 The build removes remote announcements, top promotions, and Sponsor content. It
