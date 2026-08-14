@@ -368,7 +368,7 @@ jobs:
                 "repos/${RELEASE_REPOSITORY}/releases" \
                 --input - \
                 --jq .id
-          )
+          )"
           test -n "${RELEASE_ID}"
           echo "release_id=${RELEASE_ID}" >> "${GITHUB_OUTPUT}"
           for source in release-assets/* target-manifests/*.json latest.json SHA256SUMS.txt; do
