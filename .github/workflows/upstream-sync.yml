@@ -1,12 +1,12 @@
-name: Check Official Release Every 36 Hours
+name: Check Official Release Every 24 Hours
 
 on:
   schedule:
-    - cron: '17 3,15 * * *'
+    - cron: '17 3 * * *'
   workflow_dispatch:
     inputs:
       force_check:
-        description: Ignore the 36-hour interval gate
+        description: Run the official release check immediately
         required: true
         default: true
         type: boolean
@@ -18,7 +18,6 @@ concurrency:
 env:
   UPSTREAM_REPOSITORY: jlcodes99/cockpit-tools
   RELEASE_REPOSITORY: gucang0/tools
-  CHECK_ANCHOR_EPOCH: '1786591020'
 
 jobs:
   check-and-prepare:
@@ -33,7 +32,7 @@ jobs:
           ref: main
           fetch-depth: 0
           token: ${{ github.token }}
-      - name: Enforce one official check per 36 hours
+      - name: Allow the scheduled or manual official release check
         id: interval
         env:
           FORCE_CHECK: ${{ inputs.force_check || false }}
@@ -42,25 +41,9 @@ jobs:
           set -euo pipefail
           if [[ "${FORCE_CHECK}" == "true" ]]; then
             echo "Manual dispatch requested an immediate official release check."
-            echo "due=true" >> "${GITHUB_OUTPUT}"
-            exit 0
+          else
+            echo "Running the scheduled 24-hour official release check."
           fi
-
-          NOW_EPOCH="$(date -u +%s)"
-          if (( NOW_EPOCH < CHECK_ANCHOR_EPOCH )); then
-            echo "The 36-hour check schedule has not reached its anchor time."
-            echo "due=false" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-
-          ELAPSED_TWELVE_HOUR_SLOTS=$(( (NOW_EPOCH - CHECK_ANCHOR_EPOCH) / 43200 ))
-          if (( ELAPSED_TWELVE_HOUR_SLOTS % 3 != 0 )); then
-            echo "Official release check is not due in this 12-hour slot."
-            echo "due=false" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-
-          echo "Official release check is due today."
           echo "due=true" >> "${GITHUB_OUTPUT}"
       - name: Read the latest stable official release
         if: ${{ steps.interval.outputs.due == 'true' }}
