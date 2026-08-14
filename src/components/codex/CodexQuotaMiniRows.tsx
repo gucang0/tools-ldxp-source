@@ -34,23 +34,10 @@ function CodexQuotaMiniRow({
       : undefined);
   return (
     <div className="codex-quota-mini" title={item.hintText}>
-      <div className="codex-quota-mini-main">
-        <div className="codex-quota-mini-left">
-          <span className="codex-quota-mini-label">{item.label}</span>
-          {item.showProgress !== false ? (
-            <div className="codex-quota-mini-track" aria-hidden="true">
-              <div
-                className={`codex-quota-mini-bar ${item.quotaClass}`}
-                style={{
-                  width: `${Math.max(0, Math.min(100, item.progressPercent ?? item.percentage))}%`,
-                }}
-              />
-            </div>
-          ) : null}
-          <span className={`codex-quota-mini-pct ${item.quotaClass}`}>
-            {item.valueText}
-          </span>
-        </div>
+      <div className="codex-quota-mini-head">
+        <span className="codex-quota-mini-label" title={item.hintText || item.label}>
+          {item.label}
+        </span>
         {stats ? (
           <div
             className="codex-quota-mini-right"
@@ -84,6 +71,21 @@ function CodexQuotaMiniRow({
             ) : null}
           </div>
         ) : null}
+      </div>
+      <div className="codex-quota-mini-meter">
+        {item.showProgress !== false ? (
+          <div className="codex-quota-mini-track" aria-hidden="true">
+            <div
+              className={`codex-quota-mini-bar ${item.quotaClass}`}
+              style={{
+                width: `${Math.max(0, Math.min(100, item.progressPercent ?? item.percentage))}%`,
+              }}
+            />
+          </div>
+        ) : null}
+        <span className={`codex-quota-mini-pct ${item.quotaClass}`}>
+          {item.valueText}
+        </span>
       </div>
       {item.resetText ? (
         <div className="codex-quota-mini-reset">{item.resetText}</div>

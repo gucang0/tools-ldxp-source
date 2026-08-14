@@ -83,7 +83,6 @@ import { CodexAccountPoolHealthModal } from "../components/CodexAccountPoolHealt
 import {
   type CodexAccountGroup,
   assignAccountsToCodexGroup,
-  cleanupDeletedCodexAccounts,
   deleteCodexGroup,
   getCodexAccountGroups,
   isCodexGroupQuotaRefreshInherit,
@@ -132,6 +131,14 @@ import {
 import { buildCodexAccountPresentation } from "../presentation/platformAccountPresentation";
 import { CodexQuotaMiniRows } from "../components/codex/CodexQuotaMiniRows";
 import {
+  hydrateUserMemory,
+  isUserMemoryDismissed,
+  markUserMemoryDismissed,
+  mergeIdListsPreferExisting,
+  subscribeUserMemory,
+  USER_MEMORY_FLAGS,
+} from "../utils/userMemory";
+import {
   buildCodexAccountWindowStatQueries,
   formatCodexWindowStatsText,
   type CodexWindowStats,
@@ -168,6 +175,7 @@ import { CodexCliLaunchDialog } from "../components/codex/CodexCliLaunchDialog";
 import { useDeepSeekDirectModelPrompt } from "../components/codex/DeepSeekDirectModelModal";
 import {
   isDeepSeekAccount,
+  isCodexTokenPlanAccount,
   resolveDeepSeekBindAccountId,
   shouldShowCodexApiKeyUsagePanel,
 } from "../utils/codexDeepSeekAccess";
@@ -417,8 +425,6 @@ const CODEX_LOCAL_ACCESS_EXPANDED_KEY =
   "agtools.codex.local_access_entry_expanded.v1";
 const CODEX_LOCAL_ACCESS_ADDRESS_KIND_KEY =
   "agtools.codex.local_access_address_kind.v1";
-const CODEX_LOCAL_ACCESS_GATEWAY_GUIDE_DISMISSED_KEY =
-  "agtools.codex.api_service.gateway_guide.dismissed.v1";
 const DEFAULT_CODEX_API_PROVIDER_ID = OPENAI_OFFICIAL_PRESET_ID;
 const DEFAULT_CODEX_API_BASE_URL = OPENAI_OFFICIAL_BASE_URL;
 const CODEX_LOCAL_ACCESS_FALLBACK_PORT = 54140;
@@ -623,22 +629,11 @@ function persistLocalAccessAddressKind(
 }
 
 function readLocalAccessGatewayGuideDismissed(): boolean {
-  try {
-    return (
-      localStorage.getItem(CODEX_LOCAL_ACCESS_GATEWAY_GUIDE_DISMISSED_KEY) ===
-      "1"
-    );
-  } catch {
-    return false;
-  }
+  return isUserMemoryDismissed(USER_MEMORY_FLAGS.gatewayGuide);
 }
 
 function persistLocalAccessGatewayGuideDismissed(): void {
-  try {
-    localStorage.setItem(CODEX_LOCAL_ACCESS_GATEWAY_GUIDE_DISMISSED_KEY, "1");
-  } catch {
-    // ignore storage write failures
-  }
+  void markUserMemoryDismissed(USER_MEMORY_FLAGS.gatewayGuide);
 }
 
 const CODEX_BATCH_IMPORT_SESSION_STORAGE_KEY =
@@ -720,12 +715,13 @@ function getCockpitApiStatsRecord(
 
 function resolveApiKeyUsageMode(
   summary?: CodexModelProviderUsageSummary,
-): "new_api" | "sub2api" | "deepseek" | null {
+): "new_api" | "sub2api" | "deepseek" | "token_plan" | null {
   if (!summary) return null;
   if (
     summary.mode === "new_api" ||
     summary.mode === "sub2api" ||
-    summary.mode === "deepseek"
+    summary.mode === "deepseek" ||
+    summary.mode === "token_plan"
   ) {
     return summary.mode;
   }
@@ -1352,6 +1348,14 @@ export function CodexAccountsPage() {
     localAccessGatewayGuideDismissed,
     setLocalAccessGatewayGuideDismissed,
   ] = useState(readLocalAccessGatewayGuideDismissed);
+
+  useEffect(() => {
+    void hydrateUserMemory().then(() => {
+      if (isUserMemoryDismissed(USER_MEMORY_FLAGS.gatewayGuide)) {
+        setLocalAccessGatewayGuideDismissed(true);
+      }
+    });
+  }, []);
 
   const store = useCodexAccountStore();
   const codexInstanceStore = useCodexInstanceStore();
@@ -4226,13 +4230,20 @@ export function CodexAccountsPage() {
   }, [accounts]);
 
   useEffect(() => {
+    return subscribeUserMemory(() => {
+      setCustomSortOrder((prev) =>
+        mergeIdListsPreferExisting(readCodexCustomSortOrder(), prev),
+      );
+    });
+  }, []);
+
+  useEffect(() => {
     if (accounts.length === 0) {
       return;
     }
     const accountIds = accounts.map((account) => account.id);
-    const accountIdSet = new Set(accountIds);
     setCustomSortOrder((prev) => {
-      const next = prev.filter((accountId) => accountIdSet.has(accountId));
+      const next = [...prev];
       const seen = new Set(next);
       for (const accountId of accountIds) {
         if (!seen.has(accountId)) {
@@ -7645,7 +7656,8 @@ export function CodexAccountsPage() {
     async (account: CodexAccount, provider?: CodexModelProvider | null) => {
       if (
         isCodexChatCompletionsApiKeyAccount(account) &&
-        !isDeepSeekAccount(account)
+        !isDeepSeekAccount(account) &&
+        !isCodexTokenPlanAccount(account)
       ) {
         return;
       }
@@ -7717,7 +7729,8 @@ export function CodexAccountsPage() {
         !isCodexApiKeyAccount(account) ||
         isCodexNewApiAccount(account) ||
         (isCodexChatCompletionsApiKeyAccount(account) &&
-          !isDeepSeekAccount(account))
+          !isDeepSeekAccount(account) &&
+          !isCodexTokenPlanAccount(account))
       ) {
         return false;
       }
@@ -7813,7 +7826,8 @@ export function CodexAccountsPage() {
         .filter(
           (account) =>
             isCodexChatCompletionsApiKeyAccount(account) &&
-            !isDeepSeekAccount(account),
+            !isDeepSeekAccount(account) &&
+            !isCodexTokenPlanAccount(account),
         )
         .map((account) => account.id),
     );
@@ -7959,6 +7973,39 @@ export function CodexAccountsPage() {
   const formatApiKeyUsageDetailLabel = useCallback(
     (key: string, fallback: string): string => {
       const labels: Record<string, string> = {
+        modelName: t("codex.modelProviders.usage.fields.modelName", "Model"),
+        intervalRemaining: t(
+          "codex.modelProviders.usage.fields.intervalRemaining",
+          "Interval Remaining",
+        ),
+        intervalLimit: t(
+          "codex.modelProviders.usage.fields.intervalLimit",
+          "Interval Limit",
+        ),
+        intervalRemainingPercent: t(
+          "codex.modelProviders.usage.fields.intervalRemainingPercent",
+          "Interval Remaining %",
+        ),
+        intervalExpiresAt: t(
+          "codex.modelProviders.usage.fields.intervalExpiresAt",
+          "Interval Reset",
+        ),
+        weeklyRemaining: t(
+          "codex.modelProviders.usage.fields.weeklyRemaining",
+          "Weekly Remaining",
+        ),
+        weeklyLimit: t(
+          "codex.modelProviders.usage.fields.weeklyLimit",
+          "Weekly Limit",
+        ),
+        weeklyRemainingPercent: t(
+          "codex.modelProviders.usage.fields.weeklyRemainingPercent",
+          "Weekly Remaining %",
+        ),
+        weeklyExpiresAt: t(
+          "codex.modelProviders.usage.fields.weeklyExpiresAt",
+          "Weekly Reset",
+        ),
         status: t("codex.modelProviders.usage.fields.status", "状态"),
         planName: t("codex.modelProviders.usage.fields.planName", "订阅"),
         remaining: t("codex.modelProviders.usage.fields.remaining", "剩余额度"),
@@ -8048,6 +8095,12 @@ export function CodexAccountsPage() {
         return numeric > 0 ? formatDate(numeric * 1000) : "-";
       }
       if (
+        Number.isFinite(numeric) &&
+        (item.key === "intervalExpiresAt" || item.key === "weeklyExpiresAt")
+      ) {
+        return numeric > 0 ? formatDate(numeric * 1000) : "-";
+      }
+      if (
         item.key === "quotaUnlimited" ||
         item.key === "modelLimitsEnabled" ||
         item.key === "isAvailable"
@@ -8122,7 +8175,8 @@ export function CodexAccountsPage() {
     ): ReactElement => {
       if (
         isCodexChatCompletionsApiKeyAccount(account) &&
-        !isDeepSeekAccount(account)
+        !isDeepSeekAccount(account) &&
+        !isCodexTokenPlanAccount(account)
       ) {
         return <></>;
       }
@@ -8138,6 +8192,7 @@ export function CodexAccountsPage() {
         isDeepSeekAccount(account) || usageMode === "deepseek";
       const isNewApiUsage = usageMode === "new_api";
       const isSub2ApiUsage = usageMode === "sub2api";
+      const isTokenPlanUsage = usageMode === "token_plan";
       const usedPercent = formatApiKeyUsagePercent(summary);
       if (isDeepSeekUsage) {
         return (
@@ -8225,6 +8280,54 @@ export function CodexAccountsPage() {
               <span className="quota-reset">
                 {t("codex.modelProviders.usage.fields.expiresAt", "过期时间")}：
                 {expiresText}
+              </span>
+            )}
+          </div>
+        );
+      }
+      if (variant === "card" && summary && isTokenPlanUsage) {
+        const resetDetail =
+          findApiKeyUsageDetail(summary, "intervalExpiresAt") ??
+          findApiKeyUsageDetail(summary, "weeklyExpiresAt") ??
+          findApiKeyUsageDetail(summary, "expiresAt");
+        return (
+          <div
+            className="quota-item codex-api-key-quota-item token-plan"
+            title={`${t(
+              "codex.modelProviders.usage.fields.remaining",
+              "Remaining",
+            )}: ${formatApiKeyUsageQuotaValue(
+              summary,
+              summary.quotaRemaining ?? summary.remaining,
+            )}`}
+          >
+            <div className="quota-header">
+              <Database size={14} />
+              <span className="quota-label">
+                {t("codex.modelProviders.usage.fields.planName", "Token Plan")}
+              </span>
+              <span className="quota-pct high">
+                {formatApiKeyUsageQuotaValue(
+                  summary,
+                  summary.quotaRemaining ?? summary.remaining,
+                )}
+              </span>
+            </div>
+            <div className="quota-bar-track">
+              <div
+                className="quota-bar high"
+                style={{ width: `${Math.max(0, Math.min(100, usedPercent))}%` }}
+              />
+            </div>
+            {(summary.planName || resetDetail) && (
+              <span className="quota-reset">
+                {summary.planName || "Token Plan"}
+                {resetDetail
+                  ? ` · ${formatApiKeyUsageDetailValue(
+                      resetDetail,
+                      summary.unit,
+                    )}`
+                  : ""}
               </span>
             )}
           </div>
@@ -8354,6 +8457,50 @@ export function CodexAccountsPage() {
                       </strong>
                     </div>
                   </>
+                ) : isTokenPlanUsage ? (
+                  <>
+                    <div>
+                      <span>
+                        {t(
+                          "codex.modelProviders.usage.fields.remaining",
+                          "Remaining",
+                        )}
+                      </span>
+                      <strong>
+                        {formatApiKeyUsageQuotaValue(
+                          summary,
+                          summary.quotaRemaining ?? summary.remaining,
+                        )}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>
+                        {t(
+                          "codex.modelProviders.usage.fields.planName",
+                          "Plan",
+                        )}
+                      </span>
+                      <strong>{summary.planName || "-"}</strong>
+                    </div>
+                    <div>
+                      <span>
+                        {t(
+                          "codex.modelProviders.usage.fields.expiresAt",
+                          "Next Reset",
+                        )}
+                      </span>
+                      <strong>
+                        {formatApiKeyUsageDetailByKey(
+                          summary,
+                          findApiKeyUsageDetail(summary, "intervalExpiresAt")
+                            ? "intervalExpiresAt"
+                            : findApiKeyUsageDetail(summary, "weeklyExpiresAt")
+                              ? "weeklyExpiresAt"
+                              : "expiresAt",
+                        )}
+                      </strong>
+                    </div>
+                  </>
                 ) : isSub2ApiUsage ? (
                   <>
                     <div>
@@ -8399,7 +8546,7 @@ export function CodexAccountsPage() {
                   </>
                 ) : null}
               </div>
-              {isNewApiUsage ? (
+              {isNewApiUsage || isTokenPlanUsage ? (
                 <div className="codex-api-key-usage-progress">
                   <div className="cockpit-api-progress-track">
                     <div
@@ -9742,28 +9889,6 @@ export function CodexAccountsPage() {
       setBatchImportTargetGroupId(null);
     }
   }, [batchImportTargetGroupId, codexGroups]);
-
-  useEffect(() => {
-    const existingAccountIds = new Set(accounts.map((account) => account.id));
-    const hasStaleAccountIds = codexGroups.some((group) =>
-      group.accountIds.some((accountId) => !existingAccountIds.has(accountId)),
-    );
-    if (!hasStaleAccountIds) {
-      return;
-    }
-
-    void (async () => {
-      try {
-        await cleanupDeletedCodexAccounts(existingAccountIds);
-        await reloadCodexGroups();
-      } catch (error) {
-        console.error(
-          "Failed to clean up deleted Codex accounts from groups:",
-          error,
-        );
-      }
-    })();
-  }, [accounts, codexGroups, reloadCodexGroups]);
 
   const handleEnterGroup = useCallback(
     (groupId: string) => {
@@ -11120,6 +11245,9 @@ export function CodexAccountsPage() {
       const compactDeepSeekSummary = isDeepSeekAccount(account)
         ? apiKeyUsageMap[account.id]?.summary
         : undefined;
+      const compactTokenPlanSummary = isCodexTokenPlanAccount(account)
+        ? apiKeyUsageMap[account.id]?.summary
+        : undefined;
       const subscriptionInfo = resolveSubscriptionPresentation(account);
       const showCompactExpiry =
         !isApiKeyAccount && !isAgentIdentityAccount && subscriptionInfo.bucket !== "active";
@@ -11186,6 +11314,44 @@ export function CodexAccountsPage() {
                         compactDeepSeekSummary,
                         "toppedUpBalance",
                       ),
+                    ],
+                  ] as const
+                ).map(([key, label, value]) => (
+                  <span
+                    key={`${account.id}-${key}`}
+                    className={`codex-compact-quota codex-compact-quota-${key}`}
+                    title={`${label} ${value}`}
+                  >
+                    <span className="codex-compact-dot" />
+                    <span className="codex-compact-quota-value high">
+                      {value}
+                    </span>
+                  </span>
+                ))}
+              </>
+            ) : isCodexTokenPlanAccount(account) ? (
+              <>
+                {(
+                  [
+                    [
+                      "remaining",
+                      t(
+                        "codex.modelProviders.usage.fields.remaining",
+                        "Remaining",
+                      ),
+                      formatApiKeyUsageMoney(
+                        compactTokenPlanSummary?.quotaRemaining ??
+                          compactTokenPlanSummary?.remaining,
+                        compactTokenPlanSummary?.unit,
+                      ),
+                    ],
+                    [
+                      "planName",
+                      t(
+                        "codex.modelProviders.usage.fields.planName",
+                        "Plan",
+                      ),
+                      compactTokenPlanSummary?.planName || "-",
                     ],
                   ] as const
                 ).map(([key, label, value]) => (
@@ -11345,6 +11511,8 @@ export function CodexAccountsPage() {
         showApiKeyUsagePanel &&
         (apiKeyUsageMode === "sub2api" ||
           apiKeyUsageProvider?.integrationType === "sub2api");
+      const isTokenPlanUsageAccount =
+        showApiKeyUsagePanel && apiKeyUsageMode === "token_plan";
       const isQuotaAwareApiKeyAccount =
         showApiKeyUsagePanel &&
         !isSponsorApiKeyAccount &&
@@ -11561,7 +11729,7 @@ export function CodexAccountsPage() {
                 >
                   {apiBaseUrlLine}
                 </span>
-                {isSub2ApiUsageAccount && (
+                {(isSub2ApiUsageAccount || isTokenPlanUsageAccount) && (
                   <button
                     type="button"
                     className="codex-provider-inline-switch"
@@ -12754,6 +12922,8 @@ export function CodexAccountsPage() {
         showApiKeyUsagePanel &&
         (apiKeyUsageMode === "sub2api" ||
           apiKeyUsageProvider?.integrationType === "sub2api");
+      const isTokenPlanUsageAccount =
+        showApiKeyUsagePanel && apiKeyUsageMode === "token_plan";
       const isQuotaAwareApiKeyAccount =
         showApiKeyUsagePanel &&
         !isSponsorApiKeyAccount &&
@@ -12929,7 +13099,7 @@ export function CodexAccountsPage() {
                     >
                       {apiBaseUrlLine}
                     </span>
-                    {isSub2ApiUsageAccount && (
+                    {(isSub2ApiUsageAccount || isTokenPlanUsageAccount) && (
                       <button
                         type="button"
                         className="codex-provider-inline-switch"
@@ -13408,8 +13578,10 @@ export function CodexAccountsPage() {
         ? new Set(["mode", "totalGranted", "totalAvailable", "expiresAt"])
         : usageMode === "sub2api"
           ? new Set(["mode", "remaining", "todayRequests", "todayTokens"])
-          : usageMode === "deepseek"
+        : usageMode === "deepseek"
             ? new Set(["mode", "totalBalance", "grantedBalance", "toppedUpBalance"])
+            : usageMode === "token_plan"
+              ? new Set(["mode", "remaining", "planName", "expiresAt"])
           : new Set<string>();
     const details = (summary?.details ?? []).filter(
       (item) => !coreDetailKeys.has(item.key),
@@ -13460,7 +13632,44 @@ export function CodexAccountsPage() {
                   : "-",
             },
           ]
-        : usageMode === "sub2api"
+        : usageMode === "token_plan"
+          ? [
+              {
+                key: "remaining",
+                label: t(
+                  "codex.modelProviders.usage.fields.remaining",
+                  "Remaining",
+                ),
+                value: formatApiKeyUsageQuotaValue(
+                  summary,
+                  summary?.quotaRemaining ?? summary?.remaining,
+                ),
+              },
+              {
+                key: "planName",
+                label: t(
+                  "codex.modelProviders.usage.fields.planName",
+                  "Plan",
+                ),
+                value: summary?.planName || "-",
+              },
+              {
+                key: "expiresAt",
+                label: t(
+                  "codex.modelProviders.usage.fields.expiresAt",
+                  "Next Reset",
+                ),
+                value: formatApiKeyUsageDetailByKey(
+                  summary,
+                  findApiKeyUsageDetail(summary, "intervalExpiresAt")
+                    ? "intervalExpiresAt"
+                    : findApiKeyUsageDetail(summary, "weeklyExpiresAt")
+                      ? "weeklyExpiresAt"
+                      : "expiresAt",
+                ),
+              },
+            ]
+          : usageMode === "sub2api"
           ? [
               {
                 key: "accountBalance",
@@ -13528,7 +13737,9 @@ export function CodexAccountsPage() {
               ]
           : [];
     const summaryGridClassName =
-      usageMode === "sub2api" || usageMode === "new_api"
+      usageMode === "sub2api" ||
+      usageMode === "new_api" ||
+      usageMode === "token_plan"
         ? "cockpit-api-summary-grid compact"
         : "cockpit-api-summary-grid";
 
