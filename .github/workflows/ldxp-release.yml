@@ -287,6 +287,8 @@ jobs:
           mkdir signer
           cd signer
           npm init -y >/dev/null
+          expected_integrity='sha512-3xDdXL5omQ3sPfBfdC8fCtDKcnyV7OqyzQgfyT5P3+zY6lcPqIYKQBvUasNvppi21RSdfhy44ttvJmftb0PCDw=='
+          test "$(npm view @tauri-apps/cli@2.9.6 dist.integrity)" = "${expected_integrity}"
           npm install --ignore-scripts --no-audit --no-fund --save-exact @tauri-apps/cli@2.9.6
           test "$(node -p "require('./node_modules/@tauri-apps/cli/package.json').version")" = '2.9.6'
       - name: Sign updater assets
@@ -301,6 +303,19 @@ jobs:
           for asset in "${assets[@]}"; do
             signer/node_modules/.bin/tauri signer sign "${asset}"
             test -s "${asset}.sig"
+          done
+      - name: Verify updater signatures before export
+        shell: bash
+        env:
+          TAURI_UPDATER_PUBLIC_KEY: RWS+DpkEsugM2xPKsiK/TX1zUlayIvY6X35nscFQBnlF+jD5TQ9HJzy4
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y minisign
+          for asset in release-assets/*_x64-setup.exe release-assets/*_x64_en-US.msi release-assets/*_universal.app.tar.gz; do
+            base64 --decode "${asset}.sig" > "${asset}.minisig"
+            minisign -Vm "${asset}" -x "${asset}.minisig" -P "${TAURI_UPDATER_PUBLIC_KEY}"
+            rm "${asset}.minisig"
           done
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
