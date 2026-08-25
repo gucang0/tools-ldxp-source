@@ -142,8 +142,8 @@ function validateRuntimeCustomization() {
   requireText(app, "'update-check-requested'", 'Application updater');
   requireText(settings, 'handleCheckUpdate', 'Settings update entry');
   requireText(updaterNotes, 'https://github.com/gucang0/tools/releases/', 'Updater release notes');
-  requireText(syncWorkflow, 'Check Official Release Every 24 Hours', 'Upstream sync schedule');
-  requireText(syncWorkflow, "cron: '17 3 * * *'", 'Upstream sync schedule');
+  requireText(syncWorkflow, 'Check Official Release Every 6 Hours', 'Upstream sync schedule');
+  requireText(syncWorkflow, "cron: '17 */6 * * *'", 'Upstream sync schedule');
   forbidText(syncWorkflow, 'CHECK_ANCHOR_EPOCH', 'Upstream sync schedule');
 
   const forbiddenBuildLabels = [

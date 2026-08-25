@@ -1,4 +1,6 @@
 .github/ldxp-customization-allowlist.txt
+.github/workflows/build-matrix.yml
+.github/workflows/codeql.yml
 .github/workflows/ldxp-release.yml
 .github/workflows/upstream-sync.yml
 .github/workflows/release.yml
