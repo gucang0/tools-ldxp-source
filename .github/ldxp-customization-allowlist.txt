@@ -18,5 +18,6 @@ src-tauri/src/lib.rs
 src-tauri/src/modules/announcement.rs
 src-tauri/src/modules/linux_updater.rs
 src-tauri/tauri.conf.json
+src-tauri/tauri.release.conf.json
 src/stores/useTopRightAdStore.ts
 src/utils/updaterReleaseNotes.ts

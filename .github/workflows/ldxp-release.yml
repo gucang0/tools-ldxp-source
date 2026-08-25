@@ -78,12 +78,17 @@ jobs:
             exit 1
           fi
           cat actual-diff.txt
-      - name: Install, typecheck, test, and build frontend
+      - name: Install, test, and build the validated frontend once
         run: |
           npm ci
-          npm run typecheck
           node --test scripts/release/*.test.cjs
-          npm run build
+          npm run build --ignore-scripts
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: frontend-dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 3
       - name: Record previous stable release
         id: previous
         env:
@@ -123,6 +128,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: ldxp-release-v1
+          shared-key: windows-x64
+          cache-on-failure: false
+          cache-workspace-crates: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: sidecars/cockpit-cliproxy/go.mod
@@ -159,18 +171,22 @@ jobs:
           $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
           $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
           if ($machine -ne 0x8664) { throw ('Official payload is not x64: 0x{0:X4}' -f $machine) }
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: frontend-dist
+          path: dist
       - name: Install dependencies and build the Windows application without signing secrets
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           npm ci
-          npm run typecheck
-          npx tauri build --ci --no-bundle --config src-tauri/tauri.ci.conf.json
+          if (-not (Test-Path -LiteralPath 'dist/index.html')) { throw 'Validated frontend artifact is missing dist/index.html' }
+          npx tauri build --ci --no-bundle --config src-tauri/tauri.release.conf.json
       - name: Bundle Windows packages without updater signing secrets
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          npx tauri bundle --ci --config src-tauri/tauri.ci.conf.json
+          npx tauri bundle --ci --config src-tauri/tauri.release.conf.json
       - name: Verify Windows application version and x64 architecture
         shell: pwsh
         env:
@@ -214,6 +230,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: ldxp-release-v1
+          shared-key: macos-universal
+          cache-on-failure: false
+          cache-workspace-crates: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: sidecars/cockpit-cliproxy/go.mod
@@ -222,13 +245,17 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: frontend-dist
+          path: dist
       - name: Install dependencies and build the Universal application without signing secrets
         run: |
           npm ci
-          npm run typecheck
-          npx tauri build --ci --no-bundle --target universal-apple-darwin --config src-tauri/tauri.ci.conf.json
+          test -f dist/index.html
+          npx tauri build --ci --no-bundle --target universal-apple-darwin --config src-tauri/tauri.release.conf.json
       - name: Bundle Universal packages without updater signing secrets
-        run: npx tauri bundle --ci --target universal-apple-darwin --config src-tauri/tauri.ci.conf.json
+        run: npx tauri bundle --ci --target universal-apple-darwin --config src-tauri/tauri.release.conf.json
       - name: Verify Universal application architecture and version
         env:
           EXPECTED_VERSION: ${{ needs.validate.outputs.version }}

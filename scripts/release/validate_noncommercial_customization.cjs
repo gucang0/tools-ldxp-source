@@ -50,6 +50,7 @@ function parseArgs(argv) {
 function validateVersion(expectedVersion) {
   const packageJson = JSON.parse(read('package.json'));
   const tauriConfig = JSON.parse(read('src-tauri/tauri.conf.json'));
+  const releaseConfig = JSON.parse(read('src-tauri/tauri.release.conf.json'));
   const cargoToml = read('src-tauri/Cargo.toml');
   const cargoVersion = cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
 
@@ -77,6 +78,12 @@ function validateVersion(expectedVersion) {
   if (tauriConfig.bundle?.createUpdaterArtifacts !== true) {
     fail('createUpdaterArtifacts must remain enabled');
   }
+  if (releaseConfig.build?.beforeBuildCommand !== '') {
+    fail('Release builds must reuse the validated frontend artifact');
+  }
+  if (releaseConfig.bundle?.createUpdaterArtifacts !== false) {
+    fail('Release builds must keep automatic updater artifact generation disabled');
+  }
 }
 
 function validateRuntimeCustomization() {
@@ -88,6 +95,7 @@ function validateRuntimeCustomization() {
   const settings = read('src/pages/SettingsPage.tsx');
   const updaterNotes = read('src/utils/updaterReleaseNotes.ts');
   const syncWorkflow = read('.github/workflows/upstream-sync.yml');
+  const releaseWorkflow = read('.github/workflows/ldxp-release.yml');
 
   const tauriAnnouncementState = functionSection(
     tauriAnnouncement,
@@ -145,6 +153,23 @@ function validateRuntimeCustomization() {
   requireText(syncWorkflow, 'Check Official Release Every 6 Hours', 'Upstream sync schedule');
   requireText(syncWorkflow, "cron: '17 */6 * * *'", 'Upstream sync schedule');
   forbidText(syncWorkflow, 'CHECK_ANCHOR_EPOCH', 'Upstream sync schedule');
+  requireText(releaseWorkflow, 'name: frontend-dist', 'Release workflow frontend artifact');
+  requireText(releaseWorkflow, 'cache-workspace-crates: false', 'Release workflow Rust cache');
+  requireText(
+    releaseWorkflow,
+    "save-if: ${{ github.ref == 'refs/heads/main' }}",
+    'Release workflow Rust cache',
+  );
+  requireText(
+    releaseWorkflow,
+    'src-tauri/tauri.release.conf.json',
+    'Release workflow configuration',
+  );
+  forbidText(
+    releaseWorkflow,
+    'src-tauri/tauri.ci.conf.json',
+    'Release workflow configuration',
+  );
 
   const forbiddenBuildLabels = [
     String.fromCodePoint(0x975e, 0x5b98, 0x65b9),
