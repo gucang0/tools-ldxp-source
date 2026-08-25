@@ -143,12 +143,21 @@ jobs:
           set -e
           if [ ${MERGE_STATUS} -ne 0 ]; then
             mapfile -t CONFLICTS < <(git diff --name-only --diff-filter=U)
-            if [ "${#CONFLICTS[@]}" -eq 1 ] && [ "${CONFLICTS[0]}" = ".github/workflows/release.yml" ]; then
-              git rm --force .github/workflows/release.yml
-            else
-              printf 'Merge conflicts block publication:\n%s\n' "${CONFLICTS[@]}"
-              exit 1
-            fi
+            for conflict in "${CONFLICTS[@]}"; do
+              case "${conflict}" in
+                .github/workflows/release.yml)
+                  git rm --force "${conflict}"
+                  ;;
+                .github/workflows/build-matrix.yml|.github/workflows/codeql.yml)
+                  git checkout --ours -- "${conflict}"
+                  git add "${conflict}"
+                  ;;
+                *)
+                  echo "Unrecognized merge conflict blocks publication: ${conflict}"
+                  exit 1
+                  ;;
+              esac
+            done
           fi
           test -z "$(git diff --name-only --diff-filter=U)"
           node scripts/release/update_upstream_baseline.cjs --version "${VERSION}" --commit "${UPSTREAM_COMMIT}"

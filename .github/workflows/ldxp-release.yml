@@ -322,7 +322,6 @@ jobs:
     permissions:
       contents: write
     env:
-      GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
       VERSION: ${{ needs.validate.outputs.version }}
       PREVIOUS_LATEST_TAG: ${{ needs.validate.outputs.previous_latest_tag }}
     steps:
@@ -388,6 +387,8 @@ jobs:
           test -s SHA256SUMS.txt
       - name: Create draft and upload the verified candidate
         id: draft
+        env:
+          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -451,6 +452,7 @@ jobs:
       - name: Verify every draft asset through the GitHub API
         shell: bash
         env:
+          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
           RELEASE_ID: ${{ steps.draft.outputs.release_id }}
         run: |
           set -euo pipefail
@@ -467,6 +469,7 @@ jobs:
       - name: Publish as the new Latest release
         id: publish_release
         env:
+          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
           RELEASE_ID: ${{ steps.draft.outputs.release_id }}
         shell: bash
         run: |
@@ -496,6 +499,8 @@ jobs:
           fi
       - name: Restore the previous Latest release after any post-publication failure
         if: ${{ failure() && steps.publish_release.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
         shell: bash
         run: |
           gh release edit "${PREVIOUS_LATEST_TAG}" --repo "${RELEASE_REPOSITORY}" --latest
@@ -503,6 +508,7 @@ jobs:
       - name: Remove a failed unpublished draft
         if: ${{ failure() && steps.draft.outcome == 'success' && steps.publish_release.outcome != 'success' }}
         env:
+          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
           RELEASE_ID: ${{ steps.draft.outputs.release_id }}
         shell: bash
         run: |
