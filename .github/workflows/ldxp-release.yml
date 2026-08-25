@@ -400,6 +400,12 @@ jobs:
             done
           ) | sed -E 's#  (release-assets/|target-manifests/)#  #' > SHA256SUMS.txt
           test -s SHA256SUMS.txt
+      - name: Verify the candidate can still fast-forward main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git merge-base --is-ancestor origin/main HEAD
       - name: Create draft and upload the verified candidate
         id: draft
         env:

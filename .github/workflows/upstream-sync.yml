@@ -115,9 +115,16 @@ jobs:
           set -euo pipefail
           BRANCH="automation/candidate-v${VERSION}"
           if git ls-remote --exit-code --heads origin "refs/heads/${BRANCH}" >/dev/null 2>&1; then
-            echo "Candidate branch ${BRANCH} already exists; validating it for a release retry."
+            echo "Candidate branch ${BRANCH} already exists; refreshing and validating it for a release retry."
             git fetch --force origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
+            git fetch --force origin "refs/heads/main:refs/remotes/origin/main"
             git switch --detach "refs/remotes/origin/${BRANCH}"
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            if ! git merge-base --is-ancestor refs/remotes/origin/main HEAD; then
+              echo "Merging the latest main hardening into ${BRANCH} before retrying."
+              git merge --no-edit refs/remotes/origin/main
+            fi
             test "$(node -p "require('./package.json').version")" = "${VERSION}"
             git merge-base --is-ancestor "${UPSTREAM_COMMIT}" HEAD
             node scripts/release/validate_noncommercial_customization.cjs --version "${VERSION}"
@@ -131,6 +138,9 @@ jobs:
               echo 'Existing candidate contains customization outside the allowlist:'
               cat "${UNEXPECTED_DIFF}"
               exit 1
+            fi
+            if [[ "$(git rev-parse HEAD)" != "$(git rev-parse refs/remotes/origin/${BRANCH})" ]]; then
+              git push origin "HEAD:refs/heads/${BRANCH}"
             fi
             exit 0
           fi
