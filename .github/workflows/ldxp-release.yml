@@ -165,8 +165,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           npm ci
           npm run typecheck
-          npm run build
-          npx tauri build --ci --no-bundle --config '{"build":{"beforeBuildCommand":""}}'
+          npx tauri build --ci --no-bundle --config src-tauri/tauri.ci.conf.json
       - name: Bundle and sign Windows updater packages
         shell: pwsh
         env:
@@ -233,8 +232,7 @@ jobs:
         run: |
           npm ci
           npm run typecheck
-          npm run build
-          npx tauri build --ci --no-bundle --target universal-apple-darwin --config '{"build":{"beforeBuildCommand":""}}'
+          npx tauri build --ci --no-bundle --target universal-apple-darwin --config src-tauri/tauri.ci.conf.json
       - name: Bundle and sign Universal updater packages
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
