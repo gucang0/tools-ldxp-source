@@ -1,10 +1,10 @@
 # Upstream Baseline
 
-This customization is based on the Cockpit Tools 1.3.28 release source.
+This customization is based on the Cockpit Tools 1.3.29 release source.
 
 - Upstream repository: https://github.com/jlcodes99/cockpit-tools
-- Upstream tag: `v1.3.28`
-- Verified source commit: `82576b9634bad0a365abc51eba8f022fb0a50d97`
+- Upstream tag: `v1.3.29`
+- Verified source commit: `83ce2d192cc954cc910ce89edf2d1f710c218798`
 - License: CC BY-NC-SA 4.0
 
 The customization removes top promotional content. It keeps the application
