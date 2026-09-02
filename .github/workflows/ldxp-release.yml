@@ -69,8 +69,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git diff --name-only "upstream-v${VERSION}..HEAD" | sort -u > actual-diff.txt
-          sort -u .github/ldxp-customization-allowlist.txt > allowed-diff.txt
+          git fetch origin main
+          test "$(git rev-parse HEAD:.github/workflows)" = "$(git rev-parse origin/main:.github/workflows)"
+          git diff --name-only "upstream-v${VERSION}..HEAD" \
+            | sed '/^\.github\/workflows\//d' \
+            | sort -u > actual-diff.txt
+          sed '/^\.github\/workflows\//d' .github/ldxp-customization-allowlist.txt \
+            | sort -u > allowed-diff.txt
           comm -23 actual-diff.txt allowed-diff.txt > unexpected-diff.txt
           if [ -s unexpected-diff.txt ]; then
             echo "Unexpected customization files:"
@@ -134,7 +139,7 @@ jobs:
           shared-key: windows-x64
           cache-on-failure: false
           cache-workspace-crates: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/automation/candidate-v') }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: sidecars/cockpit-cliproxy/go.mod
@@ -205,13 +210,31 @@ jobs:
           "Authenticode status (informational): $($signature.Status)"
       - name: Stage and validate unsigned Windows release assets
         shell: pwsh
+        env:
+          EXPECTED_VERSION: ${{ needs.validate.outputs.version }}
         run: |
+          $ErrorActionPreference = 'Stop'
           node scripts/release/stage_release_assets.cjs --platform windows --assets-dir target/release/bundle --output-dir unsigned-assets
-          $setup = @(Get-ChildItem unsigned-assets -File -Filter '*_x64-setup.exe')
-          $msi = @(Get-ChildItem unsigned-assets -File -Filter '*_x64_en-US.msi')
+          $setup = @(Get-ChildItem unsigned-assets -File -Filter "Cockpit.Tools_$env:EXPECTED_VERSION`_x64-setup.exe")
+          $msi = @(Get-ChildItem unsigned-assets -File -Filter "Cockpit.Tools_$env:EXPECTED_VERSION`_x64_en-US.msi")
           if ($setup.Count -ne 1 -or $msi.Count -ne 1) { throw 'Expected one NSIS and one MSI package' }
           if (@(Get-ChildItem unsigned-assets -File -Filter '*.sig').Count -ne 0) {
             throw 'Unsigned build unexpectedly produced updater signatures'
+          }
+          if ($setup[0].VersionInfo.ProductVersion -notlike "$env:EXPECTED_VERSION*") {
+            throw "NSIS product version mismatch: $($setup[0].VersionInfo.ProductVersion)"
+          }
+          & 7z x $setup[0].FullName '-owindows-package-unpacked' -y | Out-Null
+          $payloads = @(Get-ChildItem windows-package-unpacked -Recurse -File -Filter 'cockpit-tools.exe')
+          $sidecars = @(Get-ChildItem windows-package-unpacked -Recurse -File -Filter 'cockpit-cliproxy.exe')
+          if ($payloads.Count -ne 1 -or $sidecars.Count -ne 1) {
+            throw "Expected one packaged app and sidecar; found app=$($payloads.Count), sidecar=$($sidecars.Count)"
+          }
+          foreach ($binary in @($payloads[0], $sidecars[0])) {
+            $bytes = [System.IO.File]::ReadAllBytes($binary.FullName)
+            $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+            $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+            if ($machine -ne 0x8664) { throw ('Packaged binary {0} is not x64: 0x{1:X4}' -f $binary.Name, $machine) }
           }
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -236,7 +259,7 @@ jobs:
           shared-key: macos-universal
           cache-on-failure: false
           cache-workspace-crates: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/automation/candidate-v') }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: sidecars/cockpit-cliproxy/go.mod
@@ -264,8 +287,11 @@ jobs:
           set -euo pipefail
           APP="target/universal-apple-darwin/release/bundle/macos/Cockpit Tools.app"
           BINARY="${APP}/Contents/MacOS/cockpit-tools"
+          SIDECAR="${APP}/Contents/MacOS/cockpit-cliproxy"
           test -f "${BINARY}"
+          test -f "${SIDECAR}"
           lipo "${BINARY}" -verify_arch x86_64 arm64
+          lipo "${SIDECAR}" -verify_arch x86_64 arm64
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${APP}/Contents/Info.plist")" = "${EXPECTED_VERSION}"
           codesign --display --verbose=2 "${APP}" || true
       - name: Create the Universal updater archive
@@ -458,7 +484,7 @@ jobs:
               "repos/${RELEASE_REPOSITORY}/git/refs/tags/v${VERSION}" \
               >/dev/null 2>&1 || true
           }
-          trap cleanup_failed_draft ERR
+          trap cleanup_failed_draft EXIT
           RELEASE_ID="$(
             jq -n \
               --arg tag "v${VERSION}" \
@@ -496,7 +522,7 @@ jobs:
               --data-binary "@${source}" \
               >/dev/null
           done
-          trap - ERR
+          trap - EXIT
       - name: Verify every draft asset through the GitHub API
         shell: bash
         env:
@@ -509,6 +535,10 @@ jobs:
             gh api "repos/${RELEASE_REPOSITORY}/releases/assets/${asset_id}" \
               -H 'Accept: application/octet-stream' > "downloaded-assets/${asset_name}"
           done < <(gh api "repos/${RELEASE_REPOSITORY}/releases/${RELEASE_ID}/assets" --jq '.[] | [.id,.name] | @tsv')
+          EXPECTED_COUNT="$(find release-assets -maxdepth 1 -type f | wc -l | tr -d ' ')"
+          EXPECTED_COUNT="$((EXPECTED_COUNT + $(find target-manifests -maxdepth 1 -type f -name '*.json' | wc -l | tr -d ' ') + 2))"
+          ACTUAL_COUNT="$(find downloaded-assets -maxdepth 1 -type f | wc -l | tr -d ' ')"
+          test "${ACTUAL_COUNT}" = "${EXPECTED_COUNT}"
           for source in release-assets/* target-manifests/*.json latest.json SHA256SUMS.txt; do
             name="$(basename "${source}")"
             test -f "downloaded-assets/${name}"
@@ -526,6 +556,8 @@ jobs:
             -F draft=false -F prerelease=false -f make_latest=true >/dev/null
       - name: Verify the public update channel
         id: online_verify
+        env:
+          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -534,6 +566,11 @@ jobs:
             --repo "${RELEASE_REPOSITORY}" \
             --targets "${RELEASE_TARGETS}" \
             --legacy
+          RELEASE_JSON="$(gh api "repos/${RELEASE_REPOSITORY}/releases/tags/v${VERSION}")"
+          test "$(jq -r .draft <<<"${RELEASE_JSON}")" = false
+          test "$(jq -r .prerelease <<<"${RELEASE_JSON}")" = false
+          test "$(jq '.assets | length' <<<"${RELEASE_JSON}")" = 14
+          test "$(gh api "repos/${RELEASE_REPOSITORY}/releases/latest" --jq .tag_name)" = "v${VERSION}"
       - name: Fast-forward the customized source branch
         if: ${{ success() }}
         shell: bash
@@ -546,7 +583,7 @@ jobs:
             git push origin --delete "${GITHUB_REF_NAME}" || true
           fi
       - name: Restore the previous Latest release after any post-publication failure
-        if: ${{ failure() && steps.publish_release.outcome == 'success' }}
+        if: ${{ (failure() || cancelled()) && steps.publish_release.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
         shell: bash
@@ -554,7 +591,7 @@ jobs:
           gh release edit "${PREVIOUS_LATEST_TAG}" --repo "${RELEASE_REPOSITORY}" --latest
           gh release delete "v${VERSION}" --repo "${RELEASE_REPOSITORY}" --yes --cleanup-tag || true
       - name: Remove a failed unpublished draft
-        if: ${{ failure() && steps.draft.outcome == 'success' && steps.publish_release.outcome != 'success' }}
+        if: ${{ (failure() || cancelled()) && steps.draft.outcome == 'success' && steps.publish_release.outcome != 'success' }}
         env:
           GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
           RELEASE_ID: ${{ steps.draft.outputs.release_id }}

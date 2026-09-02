@@ -140,8 +140,11 @@ jobs:
             ACTUAL_DIFF="${RUNNER_TEMP}/actual-diff.txt"
             ALLOWED_DIFF="${RUNNER_TEMP}/allowed-diff.txt"
             UNEXPECTED_DIFF="${RUNNER_TEMP}/unexpected-diff.txt"
-            git diff --name-only "upstream-v${VERSION}" | sort -u > "${ACTUAL_DIFF}"
-            sort -u .github/ldxp-customization-allowlist.txt > "${ALLOWED_DIFF}"
+            git diff --name-only "upstream-v${VERSION}" \
+              | sed '/^\.github\/workflows\//d' \
+              | sort -u > "${ACTUAL_DIFF}"
+            sed '/^\.github\/workflows\//d' .github/ldxp-customization-allowlist.txt \
+              | sort -u > "${ALLOWED_DIFF}"
             comm -23 "${ACTUAL_DIFF}" "${ALLOWED_DIFF}" > "${UNEXPECTED_DIFF}"
             if [ -s "${UNEXPECTED_DIFF}" ]; then
               echo 'Existing candidate contains customization outside the allowlist:'
@@ -164,12 +167,13 @@ jobs:
             mapfile -t CONFLICTS < <(git diff --name-only --diff-filter=U)
             for conflict in "${CONFLICTS[@]}"; do
               case "${conflict}" in
-                .github/workflows/release.yml)
-                  git rm --force "${conflict}"
-                  ;;
-                .github/workflows/build-matrix.yml|.github/workflows/codeql.yml)
-                  git checkout --ours -- "${conflict}"
-                  git add "${conflict}"
+                .github/workflows/*)
+                  if git cat-file -e "HEAD:${conflict}" 2>/dev/null; then
+                    git checkout --ours -- "${conflict}"
+                    git add "${conflict}"
+                  else
+                    git rm --force "${conflict}"
+                  fi
                   ;;
                 *)
                   echo "Unrecognized merge conflict blocks publication: ${conflict}"
@@ -193,8 +197,11 @@ jobs:
           ACTUAL_DIFF="${RUNNER_TEMP}/actual-diff.txt"
           ALLOWED_DIFF="${RUNNER_TEMP}/allowed-diff.txt"
           UNEXPECTED_DIFF="${RUNNER_TEMP}/unexpected-diff.txt"
-          git diff --name-only "upstream-v${VERSION}" | sort -u > "${ACTUAL_DIFF}"
-          sort -u .github/ldxp-customization-allowlist.txt > "${ALLOWED_DIFF}"
+          git diff --name-only "upstream-v${VERSION}" \
+            | sed '/^\.github\/workflows\//d' \
+            | sort -u > "${ACTUAL_DIFF}"
+          sed '/^\.github\/workflows\//d' .github/ldxp-customization-allowlist.txt \
+            | sort -u > "${ALLOWED_DIFF}"
           comm -23 "${ACTUAL_DIFF}" "${ALLOWED_DIFF}" > "${UNEXPECTED_DIFF}"
           if [ -s "${UNEXPECTED_DIFF}" ]; then
             echo 'Unexpected customization outside the allowlist:'
@@ -217,11 +224,10 @@ jobs:
           ACTIVE_RUNS="$(
             gh api \
               "repos/${GITHUB_REPOSITORY}/actions/workflows/ldxp-release.yml/runs?event=workflow_dispatch&per_page=100" \
-              | jq --arg branch "${BRANCH}" \
-                '[.workflow_runs[] | select(.head_branch == $branch and .status != "completed")] | length'
+              | jq '[.workflow_runs[] | select(.status != "completed")] | length'
           )"
           if [[ "${ACTIVE_RUNS}" != "0" ]]; then
-            echo "A release run for ${BRANCH} is already active; skipping duplicate dispatch."
+            echo "A Cockpit Tools release is already active; keeping ${BRANCH} for the next retry."
             exit 0
           fi
           gh workflow run ldxp-release.yml \

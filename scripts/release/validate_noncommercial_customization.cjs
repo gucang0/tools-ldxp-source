@@ -145,6 +145,8 @@ function validateRuntimeCustomization() {
   );
   requireText(adStore, "'agtools.top_right_ad_state.cache.v1'", 'Top promotion store');
   requireText(adStore, "'agtools.top_right_ad_state.cache.v2'", 'Top promotion store');
+  forbidText(adStore, 'localStorage.getItem', 'Top promotion store');
+  forbidText(adStore, 'localStorage.setItem', 'Top promotion store');
   requireText(app, "@tauri-apps/plugin-updater", 'Application updater');
   requireText(app, 'const runUpdaterCheck', 'Application updater');
   requireText(app, "'update-check-requested'", 'Application updater');
@@ -153,13 +155,25 @@ function validateRuntimeCustomization() {
   requireText(syncWorkflow, 'Check Official Release Every 6 Hours', 'Upstream sync schedule');
   requireText(syncWorkflow, "cron: '17 */6 * * *'", 'Upstream sync schedule');
   forbidText(syncWorkflow, 'CHECK_ANCHOR_EPOCH', 'Upstream sync schedule');
+  requireText(syncWorkflow, "sed '/^\\.github\\/workflows\\//d'", 'Upstream workflow isolation');
+  requireText(syncWorkflow, '.github/workflows/*)', 'Upstream workflow conflict isolation');
+  requireText(
+    syncWorkflow,
+    'A Cockpit Tools release is already active',
+    'Cross-version release serialization',
+  );
   requireText(releaseWorkflow, 'name: frontend-dist', 'Release workflow frontend artifact');
   requireText(releaseWorkflow, 'cache-workspace-crates: false', 'Release workflow Rust cache');
   requireText(
     releaseWorkflow,
-    "save-if: ${{ github.ref == 'refs/heads/main' }}",
+    "save-if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/automation/candidate-v') }}",
     'Release workflow Rust cache',
   );
+  requireText(releaseWorkflow, 'HEAD:.github/workflows', 'Release workflow isolation');
+  requireText(releaseWorkflow, 'lipo "${SIDECAR}" -verify_arch x86_64 arm64', 'Universal sidecar validation');
+  requireText(releaseWorkflow, "'cockpit-cliproxy.exe'", 'Windows sidecar validation');
+  requireText(releaseWorkflow, 'trap cleanup_failed_draft EXIT', 'Draft cleanup');
+  requireText(releaseWorkflow, '(failure() || cancelled())', 'Cancellation rollback');
   requireText(
     releaseWorkflow,
     'src-tauri/tauri.release.conf.json',
