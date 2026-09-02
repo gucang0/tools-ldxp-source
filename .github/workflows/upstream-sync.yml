@@ -125,6 +125,15 @@ jobs:
               echo "Merging the latest main hardening into ${BRANCH} before retrying."
               git merge --no-edit refs/remotes/origin/main
             fi
+            # GitHub Actions owns this repository's workflow files. Keep the
+            # current main copies so upstream CI changes cannot block a candidate push.
+            mapfile -t ADDED_WORKFLOWS < <(git diff --name-only --diff-filter=A refs/remotes/origin/main -- .github/workflows)
+            for workflow in "${ADDED_WORKFLOWS[@]}"; do
+              git rm --force "${workflow}"
+            done
+            git restore --source=refs/remotes/origin/main --staged --worktree -- .github/workflows
+            test -z "$(git diff --name-only refs/remotes/origin/main -- .github/workflows)"
+            test -z "$(git diff --cached --name-only refs/remotes/origin/main -- .github/workflows)"
             test "$(node -p "require('./package.json').version")" = "${VERSION}"
             git merge-base --is-ancestor "${UPSTREAM_COMMIT}" HEAD
             node scripts/release/validate_noncommercial_customization.cjs --version "${VERSION}"
@@ -169,6 +178,15 @@ jobs:
               esac
             done
           fi
+          # GitHub Actions owns this repository's workflow files. Keep the
+          # pre-merge main copies so upstream CI changes cannot block a candidate push.
+          mapfile -t ADDED_WORKFLOWS < <(git diff --name-only --diff-filter=A HEAD -- .github/workflows)
+          for workflow in "${ADDED_WORKFLOWS[@]}"; do
+            git rm --force "${workflow}"
+          done
+          git restore --source=HEAD --staged --worktree -- .github/workflows
+          test -z "$(git diff --name-only HEAD -- .github/workflows)"
+          test -z "$(git diff --cached --name-only HEAD -- .github/workflows)"
           test -z "$(git diff --name-only --diff-filter=U)"
           node scripts/release/update_upstream_baseline.cjs --version "${VERSION}" --commit "${UPSTREAM_COMMIT}"
           node scripts/release/validate_noncommercial_customization.cjs --version "${VERSION}"
