@@ -7,6 +7,16 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
 ---
+## [未发布]
+
+## [1.3.46] - 2026-09-09
+
+### 变更
+
+- **默认使用 `gpt-5.5` 转发生图请求**：由于官方 ChatGPT 账号通道已不再稳定支持 `gpt-5.4-mini` 作为这条生图链路的基础模型，原先转换后的请求可能因基础模型不兼容被上游拒绝；本地 API 服务现改用 `gpt-5.5` 作为 Responses 基础模型，同时保留 `gpt-image-2` 作为生图工具模型。
+- **提升 Codex 协议兼容性**：清理上游不接受的 JSON Schema 方言元字段，按 Codex 规则清洗工具名称，在唯一匹配时恢复工具命名空间，保留 `service_tier` 和缓存写入 token 用量，函数工具未提供 `strict` 时明确传递 `false`，并将提示可重试的 server error 纳入 Codex 账号故障切换。
+- **增强 Codex 故障与协作处理**：简化大型常量工具 Schema 联合结构，识别静默的零 token `response.incomplete` 终止，将配额故障限定到受影响的 credential，并在多 Agent 优化后恢复带点号的 collaboration 工具名称。
+
 ## [1.3.45] - 2026-09-08
 
 ### 修复
