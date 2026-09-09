@@ -9,6 +9,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ---
 ## [Unreleased]
 
+## [1.3.47] - 2026-09-09
+
+### Added
+
+- **Add Pelican tests for Codex accounts**: run the same editable prompt across selected accounts in parallel, inspect generated results and HTML previews, retry failed accounts, manage account tags, and automatically or manually clean up test records and generated files.
+- **Configure the API Service image-generation model**: choose `gpt-image-2.5` or `gpt-image-2`, or enter a custom image model from the service panel or a dedicated settings dialog opened above Force Refresh Token in the launch preview. New and existing configurations default to `gpt-image-2.5`, and changes are applied to image generation and editing requests after saving.
+
 ## [1.3.46] - 2026-09-09
 
 ### Changed
