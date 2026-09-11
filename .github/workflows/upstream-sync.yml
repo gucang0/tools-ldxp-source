@@ -250,8 +250,7 @@ jobs:
               exit 1
             fi
             ARTIFACTS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts")"
-            if [[ "$(jq '[.artifacts[] | select(.expired != true)] | length' <<<"${ARTIFACTS}")" != 0 ]] && \
-               [[ "$(jq '[.artifacts[] | select(.expired == true)] | length' <<<"${ARTIFACTS}")" == 0 ]]; then
+            if [[ "$(jq '[.artifacts[] | select(.expired == true)] | length' <<<"${ARTIFACTS}")" == 0 ]]; then
               gh run rerun "${RUN_ID}" --repo "${GITHUB_REPOSITORY}" --failed
               exit 0
             fi
