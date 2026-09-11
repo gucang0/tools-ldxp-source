@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { compareVersions } = require('./release_state.cjs');
 
 const root = path.resolve(__dirname, '..', '..');
 
@@ -53,6 +54,9 @@ function validateVersion(expectedVersion) {
   const releaseConfig = JSON.parse(read('src-tauri/tauri.release.conf.json'));
   const cargoToml = read('src-tauri/Cargo.toml');
   const cargoVersion = cargoToml.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+  if (compareVersions(expectedVersion, '1.3.48') >= 0 && !packageJson.scripts?.test) {
+    fail('Upstream TypeScript test entry changed; adapt the test gate before publishing');
+  }
 
   for (const [label, actual] of [
     ['package.json', packageJson.version],
