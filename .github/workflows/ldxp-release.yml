@@ -1,4 +1,5 @@
 name: Cockpit Tools Release
+run-name: Cockpit Tools v${{ inputs.version }} | ${{ inputs.publish && 'publish' || 'dry-run' }} | ${{ inputs.source_commit || github.sha }}
 
 on:
   workflow_dispatch:
@@ -10,6 +11,16 @@ on:
       upstream_commit:
         description: Exact official tag commit (40 lowercase hex characters)
         required: true
+        type: string
+      source_commit:
+        description: Immutable customized source commit; workflow always runs from main
+        required: false
+        default: ''
+        type: string
+      candidate_branch:
+        description: Candidate branch to clean up only after verified source promotion
+        required: false
+        default: ''
         type: string
       publish:
         description: Publish after every release gate passes
@@ -37,10 +48,11 @@ jobs:
     timeout-minutes: 20
     outputs:
       version: ${{ steps.version.outputs.value }}
-      previous_latest_tag: ${{ steps.previous.outputs.tag }}
+      source_commit: ${{ steps.version.outputs.source_commit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.source_commit || github.sha }}
           fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -51,11 +63,20 @@ jobs:
         env:
           REQUESTED_VERSION: ${{ inputs.version }}
           REQUESTED_UPSTREAM_COMMIT: ${{ inputs.upstream_commit }}
+          REQUESTED_SOURCE_COMMIT: ${{ inputs.source_commit || github.sha }}
+          CANDIDATE_BRANCH: ${{ inputs.candidate_branch }}
         shell: bash
         run: |
           set -euo pipefail
+          test "${GITHUB_REF}" = refs/heads/main
           [[ "${REQUESTED_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           [[ "${REQUESTED_UPSTREAM_COMMIT}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${REQUESTED_SOURCE_COMMIT}" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "${REQUESTED_SOURCE_COMMIT}"
+          git merge-base --is-ancestor "${GITHUB_SHA}" HEAD
+          if [[ -n "${CANDIDATE_BRANCH}" ]]; then
+            test "${CANDIDATE_BRANCH}" = "automation/candidate-v${REQUESTED_VERSION}"
+          fi
           git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git" 2>/dev/null || true
           git fetch --force upstream "refs/tags/v${REQUESTED_VERSION}:refs/tags/upstream-v${REQUESTED_VERSION}"
           ACTUAL_COMMIT="$(git rev-parse "upstream-v${REQUESTED_VERSION}^{commit}")"
@@ -63,6 +84,7 @@ jobs:
           git merge-base --is-ancestor "${ACTUAL_COMMIT}" HEAD
           node scripts/release/validate_noncommercial_customization.cjs --version "${REQUESTED_VERSION}"
           echo "value=${REQUESTED_VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "source_commit=${REQUESTED_SOURCE_COMMIT}" >> "${GITHUB_OUTPUT}"
       - name: Reject customization outside the allowlist
         env:
           VERSION: ${{ steps.version.outputs.value }}
@@ -70,7 +92,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin main
-          test "$(git rev-parse HEAD:.github/workflows)" = "$(git rev-parse origin/main:.github/workflows)"
+          test "$(git rev-parse HEAD:.github/workflows)" = "$(git rev-parse "${GITHUB_SHA}:.github/workflows")"
           git diff --name-only "upstream-v${VERSION}..HEAD" \
             | sed '/^\.github\/workflows\//d' \
             | sort -u > actual-diff.txt
@@ -87,6 +109,7 @@ jobs:
         run: |
           npm ci
           node --test scripts/release/*.test.cjs
+          npm test --if-present
           npm run build --ignore-scripts
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -94,16 +117,6 @@ jobs:
           path: dist
           if-no-files-found: error
           retention-days: 3
-      - name: Record previous stable release
-        id: previous
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          TAG="$(gh api "repos/${RELEASE_REPOSITORY}/releases/latest" --jq .tag_name)"
-          test -n "${TAG}"
-          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
       - name: Create release metadata
         env:
           GH_TOKEN: ${{ github.token }}
@@ -132,6 +145,8 @@ jobs:
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.source_commit }}
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -139,7 +154,7 @@ jobs:
           shared-key: windows-x64
           cache-on-failure: false
           cache-workspace-crates: false
-          save-if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/automation/candidate-v') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: sidecars/cockpit-cliproxy/go.mod
@@ -185,13 +200,21 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           npm ci
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
+          npm test --if-present
+          if ($LASTEXITCODE -ne 0) { throw 'Windows TypeScript tests failed' }
           if (-not (Test-Path -LiteralPath 'dist/index.html')) { throw 'Validated frontend artifact is missing dist/index.html' }
           npx tauri build --ci --no-bundle --config src-tauri/tauri.release.conf.json
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/AppData/Local/tauri
+          key: ldxp-tauri-windows-${{ hashFiles('package-lock.json') }}
+          restore-keys: ldxp-tauri-windows-
       - name: Bundle Windows packages without updater signing secrets
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          npx tauri bundle --ci --config src-tauri/tauri.release.conf.json
+          node scripts/release/bundle_with_retry.cjs --ci --config src-tauri/tauri.release.conf.json
       - name: Verify Windows application version and x64 architecture
         shell: pwsh
         env:
@@ -250,6 +273,8 @@ jobs:
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.source_commit }}
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable snapshot
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
@@ -259,7 +284,7 @@ jobs:
           shared-key: macos-universal
           cache-on-failure: false
           cache-workspace-crates: false
-          save-if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/automation/candidate-v') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: sidecars/cockpit-cliproxy/go.mod
@@ -278,7 +303,7 @@ jobs:
           test -f dist/index.html
           npx tauri build --ci --no-bundle --target universal-apple-darwin --config src-tauri/tauri.release.conf.json
       - name: Bundle Universal packages without updater signing secrets
-        run: npx tauri bundle --ci --target universal-apple-darwin --config src-tauri/tauri.release.conf.json
+        run: node scripts/release/bundle_with_retry.cjs --ci --target universal-apple-darwin --config src-tauri/tauri.release.conf.json
       - name: Verify Universal application architecture and version
         env:
           EXPECTED_VERSION: ${{ needs.validate.outputs.version }}
@@ -317,12 +342,44 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+  regression-tests:
+    name: Test Go sidecar and Rust core
+    needs: validate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.source_commit }}
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: sidecars/cockpit-cliproxy/go.mod
+          cache-dependency-path: sidecars/cockpit-cliproxy/go.sum
+      - name: Test Go gateway
+        working-directory: sidecars/cockpit-cliproxy
+        run: go test ./...
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          prefix-key: ldxp-release-v1
+          shared-key: linux-core-tests
+          cache-workspace-crates: false
+          cache-on-failure: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install core test system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf pkg-config libnm-dev
+      - name: Test Rust core without user credentials
+        run: cargo test --locked --package cockpit-core -- --test-threads=1
+
   sign-updater-assets:
     name: Sign updater assets in an isolated runner
     needs:
       - validate
       - build-windows
       - build-macos-universal
+      - regression-tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -377,9 +434,8 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
-  publish:
-    name: Verify signatures and publish atomically
-    if: ${{ inputs.publish }}
+  verify-candidate:
+    name: Verify signed candidate and updater manifests (also on dry runs)
     needs:
       - validate
       - build-windows
@@ -387,16 +443,13 @@ jobs:
       - sign-updater-assets
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    permissions:
-      contents: write
     env:
       VERSION: ${{ needs.validate.outputs.version }}
-      PREVIOUS_LATEST_TAG: ${{ needs.validate.outputs.previous_latest_tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.validate.outputs.source_commit }}
           fetch-depth: 0
-          token: ${{ github.token }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -416,6 +469,11 @@ jobs:
           sudo apt-get install -y minisign
           PUBKEY="$(node -e "const c=require('./src-tauri/tauri.conf.json'); const s=Buffer.from(c.plugins.updater.pubkey,'base64').toString('utf8'); console.log(s.split(/\r?\n/).find(x=>x.startsWith('RW')))" )"
           test -n "${PUBKEY}"
+          test "$(find release-assets -maxdepth 1 -type f | wc -l | tr -d ' ')" = 7
+          test -s "release-assets/Cockpit.Tools_${VERSION}_universal.dmg"
+          test -s "release-assets/Cockpit.Tools_${VERSION}_x64-setup.exe"
+          test -s "release-assets/Cockpit.Tools_${VERSION}_x64_en-US.msi"
+          test -s release-assets/Cockpit.Tools_universal.app.tar.gz
           for asset in release-assets/*_x64-setup.exe release-assets/*_x64_en-US.msi release-assets/*_universal.app.tar.gz; do
             test -s "${asset}"
             test -s "${asset}.sig"
@@ -453,12 +511,63 @@ jobs:
             done
           ) | sed -E 's#  (release-assets/|target-manifests/)#  #' > SHA256SUMS.txt
           test -s SHA256SUMS.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verified-release-candidate
+          if-no-files-found: error
+          retention-days: 3
+          path: |
+            release-assets
+            target-manifests
+            release-metadata
+            latest.json
+            SHA256SUMS.txt
+
+  publish:
+    name: Publish verified candidate transaction
+    if: ${{ inputs.publish }}
+    needs: [validate, verify-candidate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: cockpit-tools-publication
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+      SOURCE_COMMIT: ${{ needs.validate.outputs.source_commit }}
+      CANDIDATE_BRANCH: ${{ inputs.candidate_branch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.source_commit }}
+          fetch-depth: 0
+          token: ${{ github.token }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: verified-release-candidate
       - name: Verify the candidate can still fast-forward main
         shell: bash
         run: |
           set -euo pipefail
           git fetch origin main
           git merge-base --is-ancestor origin/main HEAD
+          test "$(git rev-parse origin/main)" != "${SOURCE_COMMIT}"
+      - name: Record and guard the current stable release inside publication lock
+        id: previous
+        env:
+          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="$(gh api "repos/${RELEASE_REPOSITORY}/releases/latest" --jq .tag_name)"
+          [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          node -e 'const {compareVersions}=require("./scripts/release/release_state.cjs"); if(compareVersions(process.argv[1],process.argv[2].slice(1))<=0) throw Error("Refusing duplicate release or downgrade");' "${VERSION}" "${TAG}"
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
       - name: Create draft and upload the verified candidate
         id: draft
         env:
@@ -475,16 +584,6 @@ jobs:
             exit 1
           fi
           RELEASE_ID=""
-          cleanup_failed_draft() {
-            if [[ -n "${RELEASE_ID}" ]]; then
-              gh api --method DELETE \
-                "repos/${RELEASE_REPOSITORY}/releases/${RELEASE_ID}" || true
-            fi
-            gh api --method DELETE \
-              "repos/${RELEASE_REPOSITORY}/git/refs/tags/v${VERSION}" \
-              >/dev/null 2>&1 || true
-          }
-          trap cleanup_failed_draft EXIT
           RELEASE_ID="$(
             jq -n \
               --arg tag "v${VERSION}" \
@@ -505,6 +604,13 @@ jobs:
           )"
           test -n "${RELEASE_ID}"
           echo "release_id=${RELEASE_ID}" >> "${GITHUB_OUTPUT}"
+      - name: Upload verified candidate assets
+        env:
+          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
           for source in release-assets/* target-manifests/*.json latest.json SHA256SUMS.txt; do
             name="$(basename "${source}")"
             encoded_name="$(jq -rn --arg value "${name}" '$value | @uri')"
@@ -522,7 +628,6 @@ jobs:
               --data-binary "@${source}" \
               >/dev/null
           done
-          trap - EXIT
       - name: Verify every draft asset through the GitHub API
         shell: bash
         env:
@@ -572,6 +677,7 @@ jobs:
           test "$(jq '.assets | length' <<<"${RELEASE_JSON}")" = 14
           test "$(gh api "repos/${RELEASE_REPOSITORY}/releases/latest" --jq .tag_name)" = "v${VERSION}"
       - name: Fast-forward the customized source branch
+        id: promote_source
         if: ${{ success() }}
         shell: bash
         run: |
@@ -579,27 +685,19 @@ jobs:
           git fetch origin main
           git merge-base --is-ancestor origin/main HEAD
           git push origin HEAD:main
-          if [[ "${GITHUB_REF_NAME}" == automation/candidate-v* ]]; then
-            git push origin --delete "${GITHUB_REF_NAME}" || true
+          if [[ -n "${CANDIDATE_BRANCH}" ]]; then
+            REMOTE_CANDIDATE="$(git ls-remote --heads origin "refs/heads/${CANDIDATE_BRANCH}" | cut -f1)"
+            if [[ "${REMOTE_CANDIDATE}" == "${SOURCE_COMMIT}" ]]; then
+              git push origin --delete "${CANDIDATE_BRANCH}"
+            fi
           fi
-      - name: Restore the previous Latest release after any post-publication failure
-        if: ${{ (failure() || cancelled()) && steps.publish_release.outcome == 'success' }}
-        env:
-          GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
-        shell: bash
-        run: |
-          gh release edit "${PREVIOUS_LATEST_TAG}" --repo "${RELEASE_REPOSITORY}" --latest
-          gh release delete "v${VERSION}" --repo "${RELEASE_REPOSITORY}" --yes --cleanup-tag || true
-      - name: Remove a failed unpublished draft
-        if: ${{ (failure() || cancelled()) && steps.draft.outcome == 'success' && steps.publish_release.outcome != 'success' }}
+      - name: Recover only this transaction and preserve a promoted source release
+        if: ${{ always() && (failure() || cancelled()) && steps.draft.outputs.release_id != '' }}
         env:
           GH_TOKEN: ${{ secrets.LDXP_RELEASE_TOKEN }}
           RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+          PREVIOUS_LATEST_TAG: ${{ steps.previous.outputs.tag }}
         shell: bash
         run: |
-          if [[ -n "${RELEASE_ID}" ]]; then
-            gh api --method DELETE \
-              "repos/${RELEASE_REPOSITORY}/releases/${RELEASE_ID}" || true
-          fi
-          gh api --method DELETE \
-            "repos/${RELEASE_REPOSITORY}/git/refs/tags/v${VERSION}" || true
+          set -euo pipefail
+          node scripts/release/release_state.cjs recover "${RELEASE_REPOSITORY}" "${VERSION}" "${RELEASE_ID}" "${PREVIOUS_LATEST_TAG}" "${SOURCE_COMMIT}"

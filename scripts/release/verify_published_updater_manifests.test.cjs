@@ -151,3 +151,13 @@ test("rejects a manifest whose release asset is unavailable", async () => {
     },
   );
 });
+
+test('rejects legacy signatures that differ from target manifests', async () => {
+  let handler;
+  await withReleaseServer((req, res) => handler(req, res), async (baseUrl) => {
+    handler = releaseHandler(baseUrl, { legacyManifest: { platforms: {
+      [TARGET]: { url: `${baseUrl}/releases/download/v${VERSION}/${ASSET_NAME}`, signature: 'wrong' },
+    } } });
+    await assert.rejects(verifyPublishedUpdaterManifests(manifestOptions(baseUrl)), /Legacy and target manifest differ/);
+  });
+});

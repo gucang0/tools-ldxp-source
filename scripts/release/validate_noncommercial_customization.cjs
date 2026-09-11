@@ -166,14 +166,20 @@ function validateRuntimeCustomization() {
   requireText(releaseWorkflow, 'cache-workspace-crates: false', 'Release workflow Rust cache');
   requireText(
     releaseWorkflow,
-    "save-if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/automation/candidate-v') }}",
+    "save-if: ${{ github.ref == 'refs/heads/main' }}",
     'Release workflow Rust cache',
   );
   requireText(releaseWorkflow, 'HEAD:.github/workflows', 'Release workflow isolation');
   requireText(releaseWorkflow, 'lipo "${SIDECAR}" -verify_arch x86_64 arm64', 'Universal sidecar validation');
   requireText(releaseWorkflow, "'cockpit-cliproxy.exe'", 'Windows sidecar validation');
-  requireText(releaseWorkflow, 'trap cleanup_failed_draft EXIT', 'Draft cleanup');
+  requireText(releaseWorkflow, 'release_state.cjs recover', 'Transaction recovery');
   requireText(releaseWorkflow, '(failure() || cancelled())', 'Cancellation rollback');
+  requireText(releaseWorkflow, '  verify-candidate:', 'Dry run updater validation');
+  requireText(releaseWorkflow, 'source_commit:', 'Pinned candidate source');
+  requireText(releaseWorkflow, 'npm test --if-present', 'Upstream TypeScript tests');
+  requireText(releaseWorkflow, 'run: go test ./...', 'Upstream Go tests');
+  requireText(releaseWorkflow, 'cargo test --locked --package cockpit-core', 'Upstream Rust tests');
+  requireText(syncWorkflow, '--ref main', 'Shared main-branch cache scope');
   requireText(
     releaseWorkflow,
     'src-tauri/tauri.release.conf.json',

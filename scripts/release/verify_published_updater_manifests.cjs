@@ -2,6 +2,7 @@
 
 const path = require("path");
 const { TARGET_SPECS } = require("./build_target_latest_json.cjs");
+const { verifyLegacyAliases } = require("./verify_local_release_candidate.cjs");
 
 function parseArgs(argv) {
   const args = {};
@@ -178,9 +179,10 @@ async function verifyTargetManifest(options, target) {
     label,
   );
   await verifyAssetReachable(assetUrl, options.timeoutMs);
+  return manifest;
 }
 
-async function verifyLegacyManifest(options) {
+async function verifyLegacyManifest(options, targetManifests) {
   const manifestUrl = `${trimTrailingSlash(options.latestBaseUrl)}/latest.json`;
   const manifest = await fetchJson(manifestUrl, options.timeoutMs);
   const label = "Legacy latest.json";
@@ -190,6 +192,11 @@ async function verifyLegacyManifest(options) {
   }
 
   for (const target of options.targets) {
+    const canonical = targetManifests.get(target);
+    if (manifest.platforms[target]?.url !== canonical.url ||
+        manifest.platforms[target]?.signature?.trim() !== canonical.signature.trim()) {
+      throw new Error(`Legacy and target manifest differ for ${target}`);
+    }
     const assetUrl = validatePlatformEntry(
       manifest.platforms[target],
       target,
@@ -198,17 +205,19 @@ async function verifyLegacyManifest(options) {
     );
     await verifyAssetReachable(assetUrl, options.timeoutMs);
   }
+  verifyLegacyAliases(manifest.platforms, options.targets);
 }
 
 async function verifyPublishedUpdaterManifests(options) {
   if (!Array.isArray(options.targets) || options.targets.length === 0) {
     throw new Error("At least one target is required");
   }
+  const targetManifests = new Map();
   for (const target of options.targets) {
-    await verifyTargetManifest(options, target);
+    targetManifests.set(target, await verifyTargetManifest(options, target));
   }
   if (options.verifyLegacy) {
-    await verifyLegacyManifest(options);
+    await verifyLegacyManifest(options, targetManifests);
   }
 }
 

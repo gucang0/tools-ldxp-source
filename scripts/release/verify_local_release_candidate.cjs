@@ -4,6 +4,25 @@ const fs = require('fs');
 const path = require('path');
 const { TARGET_SPECS } = require('./build_target_latest_json.cjs');
 
+const LEGACY_TARGET_ALIASES = {
+  'darwin-aarch64': 'darwin-universal',
+  'darwin-x86_64': 'darwin-universal',
+  'windows-x86_64': 'windows-x86_64-msi',
+};
+
+function verifyLegacyAliases(platforms, targets) {
+  for (const [alias, target] of Object.entries(LEGACY_TARGET_ALIASES)) {
+    if (!targets.includes(target)) continue;
+    const entry = platforms[alias];
+    const canonical = platforms[target];
+    if (!entry || !canonical || entry.url !== canonical.url ||
+        typeof entry.signature !== 'string' || !entry.signature.trim() ||
+        entry.signature.trim() !== canonical.signature?.trim()) {
+      throw new Error(`Legacy target ${alias} must match the URL and signature of ${target}`);
+    }
+  }
+}
+
 function parseArgs(argv) {
   const result = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -33,10 +52,10 @@ function validateEntry(entry, options, target) {
   }
   const url = new URL(entry.url);
   const expectedPrefix = `https://github.com/${options.repo}/releases/download/v${options.version}/`;
-  if (!url.href.startsWith(expectedPrefix)) {
+  const assetName = decodeURIComponent(path.posix.basename(url.pathname));
+  if (url.href !== `${expectedPrefix}${encodeURIComponent(assetName)}`) {
     throw new Error(`Unexpected release URL for ${target}: ${url.href}`);
   }
-  const assetName = decodeURIComponent(path.posix.basename(url.pathname));
   if (!TARGET_SPECS[target]?.test(assetName)) {
     throw new Error(`Asset ${assetName} does not match ${target}`);
   }
@@ -72,7 +91,8 @@ function main() {
     if (manifest.version !== options.version) {
       throw new Error(`Version mismatch in target manifest ${target}`);
     }
-    targetEntries.set(target, validateEntry(manifest, options, target));
+    validateEntry(manifest, options, target);
+    targetEntries.set(target, manifest);
   }
 
   const legacy = loadJson(options.legacyPath);
@@ -81,23 +101,24 @@ function main() {
   }
   for (const target of options.targets) {
     validateEntry(legacy.platforms[target], options, target);
-  }
-  for (const legacyTarget of ['darwin-aarch64', 'darwin-x86_64']) {
-    const entry = legacy.platforms[legacyTarget];
-    if (!entry || entry.url !== legacy.platforms['darwin-universal'].url) {
-      throw new Error(`${legacyTarget} does not point to the Universal updater archive`);
+    const canonical = targetEntries.get(target);
+    if (legacy.platforms[target].url !== canonical.url ||
+        legacy.platforms[target].signature.trim() !== canonical.signature.trim()) {
+      throw new Error(`Legacy and target manifest differ for ${target}`);
     }
   }
-  if (legacy.platforms['windows-x86_64']?.url !== legacy.platforms['windows-x86_64-msi']?.url) {
-    throw new Error('Legacy Windows target does not point to the MSI updater asset');
-  }
+  verifyLegacyAliases(legacy.platforms, options.targets);
 
   console.log(`Validated ${options.targets.length} target manifests and legacy latest.json for ${options.version}`);
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(`[verify_local_release_candidate] ${error.message}`);
-  process.exit(1);
+if (require.main === module) {
+  try {
+    main();
+  } catch (error) {
+    console.error(`[verify_local_release_candidate] ${error.message}`);
+    process.exit(1);
+  }
 }
+
+module.exports = { verifyLegacyAliases, validateEntry };
