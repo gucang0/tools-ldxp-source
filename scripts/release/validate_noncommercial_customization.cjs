@@ -57,6 +57,17 @@ function validateVersion(expectedVersion) {
   if (compareVersions(expectedVersion, '1.3.48') >= 0 && !packageJson.scripts?.test) {
     fail('Upstream TypeScript test entry changed; adapt the test gate before publishing');
   }
+  if (expectedVersion === '1.3.49') {
+    const deepSeekAccessTest = read('src/utils/codexDeepSeekAccess.test.ts');
+    const startupModelTest = functionSection(
+      deepSeekAccessTest,
+      'test("keeps last official startup model or falls back to Flash"',
+      'test("DeepSeek Chat Completions accounts can query usage"',
+      'DeepSeek startup model regression test',
+    );
+    requireText(startupModelTest, '"deepseek-flash"', 'DeepSeek v1.3.49 test correction');
+    forbidText(startupModelTest, '"deepseek-v4-flash"', 'DeepSeek v1.3.49 test correction');
+  }
 
   for (const [label, actual] of [
     ['package.json', packageJson.version],

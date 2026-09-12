@@ -26,4 +26,5 @@ src-tauri/src/modules/linux_updater.rs
 src-tauri/tauri.conf.json
 src-tauri/tauri.release.conf.json
 src/stores/useTopRightAdStore.ts
+src/utils/codexDeepSeekAccess.test.ts
 src/utils/updaterReleaseNotes.ts
