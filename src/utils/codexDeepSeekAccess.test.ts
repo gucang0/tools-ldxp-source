@@ -119,10 +119,10 @@ test("keeps last official startup model or falls back to Flash", () => {
     resolveDeepSeekStartupModel({ api_startup_model: "deepseek-v4-pro" }),
     "deepseek-v4-pro",
   );
-  assert.equal(
-    resolveDeepSeekStartupModel({ api_startup_model: "gpt-5.5" }),
-    "deepseek-v4-flash",
-  );
+    assert.equal(
+      resolveDeepSeekStartupModel({ api_startup_model: "gpt-5.5" }),
+      "deepseek-flash",
+    );
   assert.equal(
     parseCodexBoundAccountId(`${CODEX_PROVIDER_GATEWAY_BIND_PREFIX}acc-2`),
     "acc-2",
