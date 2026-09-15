@@ -183,8 +183,14 @@ jobs:
                   fi
                   ;;
                 *)
-                  echo "Unrecognized merge conflict blocks publication: ${conflict}"
-                  exit 1
+                  if grep -Fqx "${conflict}" .github/ldxp-customization-allowlist.txt; then
+                    echo "Keeping the repository-owned customization for allowed conflict: ${conflict}"
+                    git checkout --ours -- "${conflict}"
+                    git add "${conflict}"
+                  else
+                    echo "Unrecognized merge conflict blocks publication: ${conflict}"
+                    exit 1
+                  fi
                   ;;
               esac
             done
