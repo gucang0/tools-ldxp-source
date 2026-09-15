@@ -57,18 +57,6 @@ function validateVersion(expectedVersion) {
   if (compareVersions(expectedVersion, '1.3.48') >= 0 && !packageJson.scripts?.test) {
     fail('Upstream TypeScript test entry changed; adapt the test gate before publishing');
   }
-  if (expectedVersion === '1.3.49') {
-    const deepSeekAccessTest = read('src/utils/codexDeepSeekAccess.test.ts');
-    const startupModelTest = functionSection(
-      deepSeekAccessTest,
-      'test("keeps last official startup model or falls back to Flash"',
-      'test("DeepSeek Chat Completions accounts can query usage"',
-      'DeepSeek startup model regression test',
-    );
-    requireText(startupModelTest, '"deepseek-flash"', 'DeepSeek v1.3.49 test correction');
-    forbidText(startupModelTest, '"deepseek-v4-flash"', 'DeepSeek v1.3.49 test correction');
-  }
-
   for (const [label, actual] of [
     ['package.json', packageJson.version],
     ['tauri.conf.json', tauriConfig.version],
@@ -111,6 +99,7 @@ function validateRuntimeCustomization() {
   const updaterNotes = read('src/utils/updaterReleaseNotes.ts');
   const syncWorkflow = read('.github/workflows/upstream-sync.yml');
   const releaseWorkflow = read('.github/workflows/ldxp-release.yml');
+  const conflictPolicy = read('scripts/release/classify_upstream_conflict.cjs');
 
   const tauriAnnouncementState = functionSection(
     tauriAnnouncement,
@@ -171,7 +160,12 @@ function validateRuntimeCustomization() {
   requireText(syncWorkflow, "cron: '17 */6 * * *'", 'Upstream sync schedule');
   forbidText(syncWorkflow, 'CHECK_ANCHOR_EPOCH', 'Upstream sync schedule');
   requireText(syncWorkflow, "sed '/^\\.github\\/workflows\\//d'", 'Upstream workflow isolation');
-  requireText(syncWorkflow, '.github/workflows/*)', 'Upstream workflow conflict isolation');
+  requireText(syncWorkflow, 'repository)', 'Upstream workflow conflict isolation');
+  requireText(syncWorkflow, 'classify_upstream_conflict.cjs', 'Upstream conflict policy');
+  forbidText(syncWorkflow, 'grep -Fqx "${conflict}"', 'Upstream conflict policy');
+  requireText(conflictPolicy, "return 'repository'", 'Upstream conflict policy');
+  requireText(conflictPolicy, "return 'upstream'", 'Upstream conflict policy');
+  requireText(conflictPolicy, "return 'block'", 'Upstream conflict policy');
   requireText(
     syncWorkflow,
     'A Cockpit Tools release is already active',

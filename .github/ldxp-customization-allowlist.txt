@@ -14,6 +14,8 @@ scripts/release/release_state.cjs
 scripts/release/release_state.test.cjs
 scripts/release/build_target_latest_json.cjs
 scripts/release/build_target_latest_json.test.cjs
+scripts/release/classify_upstream_conflict.cjs
+scripts/release/classify_upstream_conflict.test.cjs
 scripts/release/validate_noncommercial_customization.cjs
 scripts/release/update_upstream_baseline.cjs
 scripts/release/verify_local_release_candidate.cjs
@@ -26,5 +28,4 @@ src-tauri/src/modules/linux_updater.rs
 src-tauri/tauri.conf.json
 src-tauri/tauri.release.conf.json
 src/stores/useTopRightAdStore.ts
-src/utils/codexDeepSeekAccess.test.ts
 src/utils/updaterReleaseNotes.ts

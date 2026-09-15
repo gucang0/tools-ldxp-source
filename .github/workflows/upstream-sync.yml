@@ -173,8 +173,9 @@ jobs:
           if [ ${MERGE_STATUS} -ne 0 ]; then
             mapfile -t CONFLICTS < <(git diff --name-only --diff-filter=U)
             for conflict in "${CONFLICTS[@]}"; do
-              case "${conflict}" in
-                .github/workflows/*)
+              RESOLUTION="$(node scripts/release/classify_upstream_conflict.cjs "${conflict}")"
+              case "${RESOLUTION}" in
+                repository)
                   if git cat-file -e "HEAD:${conflict}" 2>/dev/null; then
                     git checkout --ours -- "${conflict}"
                     git add "${conflict}"
@@ -182,15 +183,22 @@ jobs:
                     git rm --force "${conflict}"
                   fi
                   ;;
-                *)
-                  if grep -Fqx "${conflict}" .github/ldxp-customization-allowlist.txt; then
-                    echo "Keeping the repository-owned customization for allowed conflict: ${conflict}"
-                    git checkout --ours -- "${conflict}"
+                upstream)
+                  echo "Using the official version of test conflict: ${conflict}"
+                  if git cat-file -e "upstream-v${VERSION}:${conflict}" 2>/dev/null; then
+                    git checkout --theirs -- "${conflict}"
                     git add "${conflict}"
                   else
-                    echo "Unrecognized merge conflict blocks publication: ${conflict}"
-                    exit 1
+                    git rm --force "${conflict}"
                   fi
+                  ;;
+                block)
+                  echo "Runtime or unrecognized merge conflict requires explicit adaptation: ${conflict}"
+                  exit 1
+                  ;;
+                *)
+                  echo "Invalid conflict policy result for ${conflict}: ${RESOLUTION}"
+                  exit 1
                   ;;
               esac
             done
