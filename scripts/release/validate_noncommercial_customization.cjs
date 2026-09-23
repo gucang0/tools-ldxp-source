@@ -186,7 +186,7 @@ function validateRuntimeCustomization() {
   requireText(releaseWorkflow, '  verify-candidate:', 'Dry run updater validation');
   requireText(releaseWorkflow, 'source_commit:', 'Pinned candidate source');
   requireText(releaseWorkflow, 'npm test --if-present', 'Upstream TypeScript tests');
-  requireText(releaseWorkflow, 'run: go test ./...', 'Upstream Go tests');
+  requireText(releaseWorkflow, 'run: go test -parallel=1 ./...', 'Upstream Go tests');
   requireText(releaseWorkflow, 'cargo test --locked --package cockpit-core', 'Upstream Rust tests');
   requireText(syncWorkflow, '--ref main', 'Shared main-branch cache scope');
   requireText(
