@@ -384,13 +384,19 @@ func registerManifestCodexTokenAuths(
 }
 
 func readManifestCodexTokenAuth(account *accountSpec, authDir, path string) (*coreauth.Auth, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read manifest token auth file %s: %w", path, err)
-	}
 	metadata := make(map[string]any)
-	if err = json.Unmarshal(data, &metadata); err != nil {
-		return nil, fmt.Errorf("parse manifest token auth file %s: %w", path, err)
+	for attempt := 0; attempt < 5; attempt++ {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read manifest token auth file %s: %w", path, err)
+		}
+		if err = json.Unmarshal(data, &metadata); err == nil {
+			break
+		}
+		if attempt == 4 {
+			return nil, fmt.Errorf("parse manifest token auth file %s: %w", path, err)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	provider := manifestTokenAuthProvider(account, metadata)
 	if provider == "" {
