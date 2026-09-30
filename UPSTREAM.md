@@ -7,6 +7,5 @@ This customization is based on the Cockpit Tools 1.3.63 release source.
 - Verified source commit: `ee816002b771b766af23b575b6f59b586d547acc`
 - License: CC BY-NC-SA 4.0
 
-The customization removes top promotional content. It keeps the application
-feature set and uses `gucang0/tools` as its signed updater channel. The source
-and release notes retain the upstream attribution and license.
+Only the top banner is disabled; other announcements, Sponsor features and
+business logic follow upstream. Signed updates use `gucang0/tools`.
