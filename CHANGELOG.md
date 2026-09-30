@@ -8,6 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.3.64] - 2026-10-01
+
+### Changed
+
+- Shared data directory entries now use `.cockpit_tools` / `.cockpit_tools_dev`. Existing installations automatically retain access through compatibility links, preserving stored accounts and running instance paths without manual migration. Codex provider previews show the actual configured storage paths.
+
+### Fixed
+
+- Fix Windows Codex switching and startup being blocked by a saved process ID that has exited or been reused by another program, while preserving instance ownership checks for ChatGPT processes.
+
+- Fix configured proxies not reliably reaching Codex subprocesses when launching the default Microsoft Store instance on Windows.
+
+- Fix Codex model-provider Responses streams buffering replies until generation ends; events now reach the client as they arrive.
+
 ## [1.3.63] - 2026-09-30
 
 ### Added
