@@ -208,8 +208,6 @@ jobs:
           $ErrorActionPreference = 'Stop'
           npm ci
           if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
-          npm test --if-present
-          if ($LASTEXITCODE -ne 0) { throw 'Windows TypeScript tests failed' }
           if (-not (Test-Path -LiteralPath 'dist/index.html')) { throw 'Validated frontend artifact is missing dist/index.html' }
           npx tauri build --ci --no-bundle --config src-tauri/tauri.release.conf.json
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4

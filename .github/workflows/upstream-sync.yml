@@ -108,6 +108,7 @@ jobs:
           ASSET_COUNT="$(gh api "repos/${UPSTREAM_REPOSITORY}/releases/tags/v${VERSION}" --jq "[.assets[] | select(.name == \"${EXPECTED}\")] | length")"
           test "${ASSET_COUNT}" = 1
       - name: Prepare or reuse a guarded merge candidate
+        id: candidate
         if: ${{ steps.interval.outputs.due == 'true' && steps.upstream.outputs.newer == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -116,7 +117,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo "blocked=false" >> "${GITHUB_OUTPUT}"
           BRANCH="automation/candidate-v${VERSION}"
+          BLOCKED_BRANCH="automation/blocked-v${VERSION}"
+          if git ls-remote --exit-code --heads origin "refs/heads/${BLOCKED_BRANCH}" >/dev/null 2>&1; then
+            echo "Version v${VERSION} is already blocked by a recorded runtime conflict. Skipping duplicate work until the blocker branch is removed after adaptation."
+            echo "blocked=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
           if git ls-remote --exit-code --heads origin "refs/heads/${BRANCH}" >/dev/null 2>&1; then
             echo "Candidate branch ${BRANCH} already exists; refreshing and validating it for a release retry."
             git fetch --force origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
@@ -135,6 +143,12 @@ jobs:
               git rm --force "${workflow}"
             done
             git restore --source=refs/remotes/origin/main --staged --worktree -- .github/workflows
+            # The upstream release workflow test targets .github/workflows/release.yml,
+            # which is intentionally absent from this repository. Keep this test out of
+            # the customized source so the official product tests remain runnable.
+            if test -f scripts/release/release_workflow.test.cjs; then
+              git rm --force scripts/release/release_workflow.test.cjs
+            fi
             test -z "$(git diff --name-only refs/remotes/origin/main -- .github/workflows)"
             test -z "$(git diff --cached --name-only refs/remotes/origin/main -- .github/workflows)"
             test "$(node -p "require('./package.json').version")" = "${VERSION}"
@@ -172,6 +186,7 @@ jobs:
           set -e
           if [ ${MERGE_STATUS} -ne 0 ]; then
             mapfile -t CONFLICTS < <(git diff --name-only --diff-filter=U)
+            BLOCKING_CONFLICTS=()
             for conflict in "${CONFLICTS[@]}"; do
               RESOLUTION="$(node scripts/release/classify_upstream_conflict.cjs "${conflict}")"
               case "${RESOLUTION}" in
@@ -193,8 +208,7 @@ jobs:
                   fi
                   ;;
                 block)
-                  echo "Runtime or unrecognized merge conflict requires explicit adaptation: ${conflict}"
-                  exit 1
+                  BLOCKING_CONFLICTS+=("${conflict}")
                   ;;
                 *)
                   echo "Invalid conflict policy result for ${conflict}: ${RESOLUTION}"
@@ -202,6 +216,17 @@ jobs:
                   ;;
               esac
             done
+            if (( ${#BLOCKING_CONFLICTS[@]} > 0 )); then
+              printf 'Runtime or unrecognized merge conflicts require explicit adaptation:\n'
+              printf ' - %s\n' "${BLOCKING_CONFLICTS[@]}"
+              git merge --abort
+              git switch -c "${BLOCKED_BRANCH}"
+              git commit --allow-empty -m "ci: block automatic sync for Cockpit Tools v${VERSION}"
+              git push origin "HEAD:refs/heads/${BLOCKED_BRANCH}"
+              echo "Recorded ${BLOCKED_BRANCH}; future checks will skip this same blocked version instead of failing repeatedly."
+              echo "blocked=true" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
           fi
           # GitHub Actions owns this repository's workflow files. Keep the
           # pre-merge main copies so upstream CI changes cannot block a candidate push.
@@ -210,6 +235,12 @@ jobs:
             git rm --force "${workflow}"
           done
           git restore --source=HEAD --staged --worktree -- .github/workflows
+          # The upstream release workflow test targets .github/workflows/release.yml,
+          # which is intentionally absent from this repository. Keep this test out of
+          # the customized source so the official product tests remain runnable.
+          if test -f scripts/release/release_workflow.test.cjs; then
+            git rm --force scripts/release/release_workflow.test.cjs
+          fi
           test -z "$(git diff --name-only HEAD -- .github/workflows)"
           test -z "$(git diff --cached --name-only HEAD -- .github/workflows)"
           test -z "$(git diff --name-only --diff-filter=U)"
@@ -234,7 +265,7 @@ jobs:
           git commit --allow-empty -m "feat: sync customization with Cockpit Tools v${VERSION}"
           git push origin "HEAD:refs/heads/${BRANCH}"
       - name: Dispatch the strict build and automatic publication
-        if: ${{ steps.interval.outputs.due == 'true' && steps.upstream.outputs.newer == 'true' }}
+        if: ${{ steps.interval.outputs.due == 'true' && steps.upstream.outputs.newer == 'true' && steps.candidate.outputs.blocked != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.upstream.outputs.version }}

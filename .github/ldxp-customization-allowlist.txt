@@ -12,6 +12,7 @@ scripts/release/bundle_with_retry.cjs
 scripts/release/bundle_with_retry.test.cjs
 scripts/release/release_state.cjs
 scripts/release/release_state.test.cjs
+scripts/release/release_workflow.test.cjs
 scripts/release/build_target_latest_json.cjs
 scripts/release/build_target_latest_json.test.cjs
 scripts/release/classify_upstream_conflict.cjs
