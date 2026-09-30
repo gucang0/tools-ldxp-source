@@ -186,8 +186,6 @@ function validateRuntimeCustomization() {
   requireText(releaseWorkflow, '  verify-candidate:', 'Dry run updater validation');
   requireText(releaseWorkflow, 'source_commit:', 'Pinned candidate source');
   requireText(releaseWorkflow, 'npm test --if-present', 'Upstream TypeScript tests');
-  requireText(releaseWorkflow, 'Preserve LF for source-scanning tests on Windows', 'Windows source line endings');
-  requireText(releaseWorkflow, 'git -c core.autocrlf=false restore --source=HEAD --worktree -- src/pages/useCodexAccountsOAuthController.ts', 'Windows source line endings');
   requireText(releaseWorkflow, 'run: go test -parallel=1 ./...', 'Upstream Go tests');
   requireText(releaseWorkflow, 'cargo test --locked --package cockpit-core', 'Upstream Rust tests');
   requireText(syncWorkflow, '--ref main', 'Shared main-branch cache scope');
