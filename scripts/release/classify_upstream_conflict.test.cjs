@@ -6,6 +6,11 @@ test('keeps repository-owned workflow files', () => {
   assert.equal(classifyUpstreamConflict('.github/workflows/release.yml'), 'repository');
 });
 
+test('preserves deletion of the upstream-only release workflow test on later updates', () => {
+  assert.equal(classifyUpstreamConflict('scripts/release/release_workflow.test.cjs'), 'repository');
+  assert.equal(classifyUpstreamConflict('scripts/release/another_workflow.test.cjs'), 'block');
+});
+
 test('uses official frontend, Go, and Rust tests', () => {
   assert.equal(classifyUpstreamConflict('src/utils/model.test.ts'), 'upstream');
   assert.equal(classifyUpstreamConflict('src/components/widget.spec.tsx'), 'upstream');

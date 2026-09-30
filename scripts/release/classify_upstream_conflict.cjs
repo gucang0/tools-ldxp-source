@@ -30,6 +30,8 @@ function isOfficialTestPath(relativePath) {
 function classifyUpstreamConflict(value) {
   const relativePath = normalizeRepositoryPath(value);
   if (relativePath.startsWith('.github/workflows/')) return 'repository';
+  // This test only validates the upstream workflow that this repository replaces.
+  if (relativePath === 'scripts/release/release_workflow.test.cjs') return 'repository';
   if (isOfficialTestPath(relativePath)) return 'upstream';
   return 'block';
 }
