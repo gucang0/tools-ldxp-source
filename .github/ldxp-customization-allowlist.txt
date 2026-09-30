@@ -12,7 +12,13 @@ scripts/release/bundle_with_retry.cjs
 scripts/release/bundle_with_retry.test.cjs
 scripts/release/release_state.cjs
 scripts/release/release_state.test.cjs
-scripts/release/release_workflow.test.cjs
+scripts/release/customization-policy.json
+scripts/release/top-ad-updater.patch
+scripts/release/prepare_candidate.cjs
+scripts/release/prepare_candidate.test.cjs
+scripts/release/sync_release.cjs
+scripts/release/sync_release.test.cjs
+scripts/release/run_release_checks.cjs
 scripts/release/build_target_latest_json.cjs
 scripts/release/build_target_latest_json.test.cjs
 scripts/release/classify_upstream_conflict.cjs

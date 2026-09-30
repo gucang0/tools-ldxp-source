@@ -108,8 +108,7 @@ jobs:
       - name: Install, test, and build the validated frontend once
         run: |
           npm ci
-          node --test scripts/release/*.test.cjs
-          npm test --if-present
+          node scripts/release/run_release_checks.cjs
           npm run build --ignore-scripts
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

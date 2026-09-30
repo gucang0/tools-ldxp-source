@@ -11,8 +11,11 @@ on:
         default: true
         type: boolean
       dry_run:
-        description: Build and verify a candidate without publishing a Release
-        required: false
+        description: Build and verify without publishing a Release
+        default: false
+        type: boolean
+      validate_current:
+        description: Also validate an already published version (requires dry_run)
         default: false
         type: boolean
 
@@ -20,13 +23,12 @@ concurrency:
   group: upstream-sync
   cancel-in-progress: false
 
-env:
-  UPSTREAM_REPOSITORY: jlcodes99/cockpit-tools
-  RELEASE_REPOSITORY: gucang0/tools
+permissions:
+  contents: read
 
 jobs:
   check-and-prepare:
-    name: Detect and prepare a guarded candidate
+    name: Detect and prepare an official-source candidate
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -37,274 +39,12 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ github.token }}
-      - name: Allow the scheduled or manual official release check
-        id: interval
-        env:
-          FORCE_CHECK: ${{ inputs.force_check || false }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "${FORCE_CHECK}" == "true" ]]; then
-            echo "Manual dispatch requested an immediate official release check."
-          else
-            echo "Running the scheduled 6-hour official release check."
-          fi
-          echo "due=true" >> "${GITHUB_OUTPUT}"
-      - name: Read the latest stable official release
-        if: ${{ steps.interval.outputs.due == 'true' }}
-        id: upstream
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '20'
+      - name: Detect, prepare and dispatch
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          RELEASE="$(gh api "repos/${UPSTREAM_REPOSITORY}/releases/latest")"
-          TAG="$(jq -r .tag_name <<<"${RELEASE}")"
-          DRAFT="$(jq -r .draft <<<"${RELEASE}")"
-          PRERELEASE="$(jq -r .prerelease <<<"${RELEASE}")"
-          [[ "${TAG}" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]
-          test "${DRAFT}" = false
-          test "${PRERELEASE}" = false
-          VERSION="${BASH_REMATCH[1]}"
-          CURRENT_VERSION="$(node -p "require('./package.json').version")"
-          PUBLISHED_TAG="$(gh api "repos/${RELEASE_REPOSITORY}/releases/latest" --jq .tag_name)"
-          [[ "${PUBLISHED_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          IS_NEWER="$(node scripts/release/release_state.cjs detect "${VERSION}" "${CURRENT_VERSION}" "${PUBLISHED_TAG#v}")"
-          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
-          echo "newer=${IS_NEWER}" >> "${GITHUB_OUTPUT}"
-          echo "Official latest: ${TAG}; customized source: v${CURRENT_VERSION}; published: ${PUBLISHED_TAG}; newer=${IS_NEWER}"
-      - name: Stop when there is no new official version
-        if: ${{ steps.interval.outputs.due == 'true' && steps.upstream.outputs.newer != 'true' }}
-        run: echo 'No new stable official Cockpit Tools release.'
-      - name: Fetch and verify the exact official tag
-        if: ${{ steps.interval.outputs.due == 'true' && steps.upstream.outputs.newer == 'true' }}
-        id: source
-        env:
-          VERSION: ${{ steps.upstream.outputs.version }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git" 2>/dev/null || true
-          git fetch --force upstream "refs/tags/v${VERSION}:refs/tags/upstream-v${VERSION}"
-          COMMIT="$(git rev-parse "upstream-v${VERSION}^{commit}")"
-          PACKAGE_VERSION="$(git show "upstream-v${VERSION}:package.json" | jq -r .version)"
-          TAURI_VERSION="$(git show "upstream-v${VERSION}:src-tauri/tauri.conf.json" | jq -r .version)"
-          CARGO_VERSION="$(git show "upstream-v${VERSION}:src-tauri/Cargo.toml" | sed -n 's/^version = "\([^"]*\)"/\1/p' | head -n1)"
-          test "${PACKAGE_VERSION}" = "${VERSION}"
-          test "${TAURI_VERSION}" = "${VERSION}"
-          test "${CARGO_VERSION}" = "${VERSION}"
-          echo "commit=${COMMIT}" >> "${GITHUB_OUTPUT}"
-      - name: Verify the official Windows x64 release asset exists
-        if: ${{ steps.interval.outputs.due == 'true' && steps.upstream.outputs.newer == 'true' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.upstream.outputs.version }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          EXPECTED="Cockpit.Tools_${VERSION}_x64-setup.exe"
-          ASSET_COUNT="$(gh api "repos/${UPSTREAM_REPOSITORY}/releases/tags/v${VERSION}" --jq "[.assets[] | select(.name == \"${EXPECTED}\")] | length")"
-          test "${ASSET_COUNT}" = 1
-      - name: Prepare or reuse a guarded merge candidate
-        id: candidate
-        if: ${{ steps.interval.outputs.due == 'true' && steps.upstream.outputs.newer == 'true' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.upstream.outputs.version }}
-          UPSTREAM_COMMIT: ${{ steps.source.outputs.commit }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "blocked=false" >> "${GITHUB_OUTPUT}"
-          BRANCH="automation/candidate-v${VERSION}"
-          BLOCKED_BRANCH="automation/blocked-v${VERSION}"
-          if git ls-remote --exit-code --heads origin "refs/heads/${BLOCKED_BRANCH}" >/dev/null 2>&1; then
-            echo "Version v${VERSION} is already blocked by a recorded runtime conflict. Skipping duplicate work until the blocker branch is removed after adaptation."
-            echo "blocked=true" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-          if git ls-remote --exit-code --heads origin "refs/heads/${BRANCH}" >/dev/null 2>&1; then
-            echo "Candidate branch ${BRANCH} already exists; refreshing and validating it for a release retry."
-            git fetch --force origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
-            git fetch --force origin "refs/heads/main:refs/remotes/origin/main"
-            git switch --detach "refs/remotes/origin/${BRANCH}"
-            git config user.name github-actions[bot]
-            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-            if ! git merge-base --is-ancestor refs/remotes/origin/main HEAD; then
-              echo "Merging the latest main hardening into ${BRANCH} before retrying."
-              git merge --no-edit refs/remotes/origin/main
-            fi
-            # GitHub Actions owns this repository's workflow files. Keep the
-            # current main copies so upstream CI changes cannot block a candidate push.
-            mapfile -t ADDED_WORKFLOWS < <(git diff --name-only --diff-filter=A refs/remotes/origin/main -- .github/workflows)
-            for workflow in "${ADDED_WORKFLOWS[@]}"; do
-              git rm --force "${workflow}"
-            done
-            git restore --source=refs/remotes/origin/main --staged --worktree -- .github/workflows
-            # The upstream release workflow test targets .github/workflows/release.yml,
-            # which is intentionally absent from this repository. Keep this test out of
-            # the customized source so the official product tests remain runnable.
-            if test -f scripts/release/release_workflow.test.cjs; then
-              git rm --force scripts/release/release_workflow.test.cjs
-            fi
-            test -z "$(git diff --name-only refs/remotes/origin/main -- .github/workflows)"
-            test -z "$(git diff --cached --name-only refs/remotes/origin/main -- .github/workflows)"
-            test "$(node -p "require('./package.json').version")" = "${VERSION}"
-            git merge-base --is-ancestor "${UPSTREAM_COMMIT}" HEAD
-            node scripts/release/validate_noncommercial_customization.cjs --version "${VERSION}"
-            ACTUAL_DIFF="${RUNNER_TEMP}/actual-diff.txt"
-            ALLOWED_DIFF="${RUNNER_TEMP}/allowed-diff.txt"
-            UNEXPECTED_DIFF="${RUNNER_TEMP}/unexpected-diff.txt"
-            git diff --name-only "upstream-v${VERSION}" \
-              | sed '/^\.github\/workflows\//d' \
-              | sort -u > "${ACTUAL_DIFF}"
-            sed '/^\.github\/workflows\//d' .github/ldxp-customization-allowlist.txt \
-              | sort -u > "${ALLOWED_DIFF}"
-            comm -23 "${ACTUAL_DIFF}" "${ALLOWED_DIFF}" > "${UNEXPECTED_DIFF}"
-            if [ -s "${UNEXPECTED_DIFF}" ]; then
-              echo 'Existing candidate contains customization outside the allowlist:'
-              cat "${UNEXPECTED_DIFF}"
-              exit 1
-            fi
-            if ! git diff --cached --quiet; then
-              git commit -m "ci: restore repository-owned workflows in ${BRANCH}"
-            fi
-            test -z "$(git status --porcelain)"
-            if [[ "$(git rev-parse HEAD)" != "$(git rev-parse refs/remotes/origin/${BRANCH})" ]]; then
-              git push origin "HEAD:refs/heads/${BRANCH}"
-            fi
-            exit 0
-          fi
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git switch -c "${BRANCH}"
-          set +e
-          git merge --no-ff --no-commit "upstream-v${VERSION}"
-          MERGE_STATUS=$?
-          set -e
-          if [ ${MERGE_STATUS} -ne 0 ]; then
-            mapfile -t CONFLICTS < <(git diff --name-only --diff-filter=U)
-            BLOCKING_CONFLICTS=()
-            for conflict in "${CONFLICTS[@]}"; do
-              RESOLUTION="$(node scripts/release/classify_upstream_conflict.cjs "${conflict}")"
-              case "${RESOLUTION}" in
-                repository)
-                  if git cat-file -e "HEAD:${conflict}" 2>/dev/null; then
-                    git checkout --ours -- "${conflict}"
-                    git add "${conflict}"
-                  else
-                    git rm --force "${conflict}"
-                  fi
-                  ;;
-                upstream)
-                  echo "Using the official version of test conflict: ${conflict}"
-                  if git cat-file -e "upstream-v${VERSION}:${conflict}" 2>/dev/null; then
-                    git checkout --theirs -- "${conflict}"
-                    git add "${conflict}"
-                  else
-                    git rm --force "${conflict}"
-                  fi
-                  ;;
-                block)
-                  BLOCKING_CONFLICTS+=("${conflict}")
-                  ;;
-                *)
-                  echo "Invalid conflict policy result for ${conflict}: ${RESOLUTION}"
-                  exit 1
-                  ;;
-              esac
-            done
-            if (( ${#BLOCKING_CONFLICTS[@]} > 0 )); then
-              printf 'Runtime or unrecognized merge conflicts require explicit adaptation:\n'
-              printf ' - %s\n' "${BLOCKING_CONFLICTS[@]}"
-              git merge --abort
-              git switch -c "${BLOCKED_BRANCH}"
-              git commit --allow-empty -m "ci: block automatic sync for Cockpit Tools v${VERSION}"
-              git push origin "HEAD:refs/heads/${BLOCKED_BRANCH}"
-              echo "Recorded ${BLOCKED_BRANCH}; future checks will skip this same blocked version instead of failing repeatedly."
-              echo "blocked=true" >> "${GITHUB_OUTPUT}"
-              exit 0
-            fi
-          fi
-          # GitHub Actions owns this repository's workflow files. Keep the
-          # pre-merge main copies so upstream CI changes cannot block a candidate push.
-          mapfile -t ADDED_WORKFLOWS < <(git diff --name-only --diff-filter=A HEAD -- .github/workflows)
-          for workflow in "${ADDED_WORKFLOWS[@]}"; do
-            git rm --force "${workflow}"
-          done
-          git restore --source=HEAD --staged --worktree -- .github/workflows
-          # The upstream release workflow test targets .github/workflows/release.yml,
-          # which is intentionally absent from this repository. Keep this test out of
-          # the customized source so the official product tests remain runnable.
-          if test -f scripts/release/release_workflow.test.cjs; then
-            git rm --force scripts/release/release_workflow.test.cjs
-          fi
-          test -z "$(git diff --name-only HEAD -- .github/workflows)"
-          test -z "$(git diff --cached --name-only HEAD -- .github/workflows)"
-          test -z "$(git diff --name-only --diff-filter=U)"
-          node scripts/release/update_upstream_baseline.cjs --version "${VERSION}" --commit "${UPSTREAM_COMMIT}"
-          node scripts/release/validate_noncommercial_customization.cjs --version "${VERSION}"
-          ACTUAL_DIFF="${RUNNER_TEMP}/actual-diff.txt"
-          ALLOWED_DIFF="${RUNNER_TEMP}/allowed-diff.txt"
-          UNEXPECTED_DIFF="${RUNNER_TEMP}/unexpected-diff.txt"
-          git diff --name-only "upstream-v${VERSION}" \
-            | sed '/^\.github\/workflows\//d' \
-            | sort -u > "${ACTUAL_DIFF}"
-          sed '/^\.github\/workflows\//d' .github/ldxp-customization-allowlist.txt \
-            | sort -u > "${ALLOWED_DIFF}"
-          comm -23 "${ACTUAL_DIFF}" "${ALLOWED_DIFF}" > "${UNEXPECTED_DIFF}"
-          if [ -s "${UNEXPECTED_DIFF}" ]; then
-            echo 'Unexpected customization outside the allowlist:'
-            cat "${UNEXPECTED_DIFF}"
-            exit 1
-          fi
-          git add --all
-          # A distinct candidate commit also makes recovery of a missing Release transactional.
-          git commit --allow-empty -m "feat: sync customization with Cockpit Tools v${VERSION}"
-          git push origin "HEAD:refs/heads/${BRANCH}"
-      - name: Dispatch the strict build and automatic publication
-        if: ${{ steps.interval.outputs.due == 'true' && steps.upstream.outputs.newer == 'true' && steps.candidate.outputs.blocked != 'true' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.upstream.outputs.version }}
-          UPSTREAM_COMMIT: ${{ steps.source.outputs.commit }}
-          PUBLISH_RELEASE: ${{ inputs.dry_run != true }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          BRANCH="automation/candidate-v${VERSION}"
-          RUNS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ldxp-release.yml/runs?event=workflow_dispatch&per_page=100")"
-          ACTIVE_RUNS="$(jq '[.workflow_runs[] | select(.status != "completed")] | length' <<<"${RUNS}")"
-          if [[ "${ACTIVE_RUNS}" != "0" ]]; then
-            echo "A Cockpit Tools release is already active; keeping ${BRANCH} for the next retry."
-            exit 0
-          fi
-          SOURCE_COMMIT="$(git rev-parse HEAD)"
-          MODE=publish
-          if [[ "${PUBLISH_RELEASE}" != true ]]; then MODE=dry-run; fi
-          TITLE="Cockpit Tools v${VERSION} | ${MODE} | ${SOURCE_COMMIT}"
-          FAILED_RUN="$(jq --arg title "${TITLE}" --arg workflow_commit "${GITHUB_SHA}" \
-            '[.workflow_runs[] | select(.display_title == $title and .head_sha == $workflow_commit and .conclusion == "failure")][0] // empty' <<<"${RUNS}")"
-          if [[ -n "${FAILED_RUN}" ]]; then
-            RUN_ID="$(jq -r .id <<<"${FAILED_RUN}")"
-            ATTEMPT="$(jq -r .run_attempt <<<"${FAILED_RUN}")"
-            if (( ATTEMPT >= 3 )); then
-              echo "Candidate failed three attempts; stop until its code or workflow is repaired."
-              exit 1
-            fi
-            ARTIFACTS="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/artifacts")"
-            if [[ "$(jq '[.artifacts[] | select(.expired == true)] | length' <<<"${ARTIFACTS}")" == 0 ]]; then
-              gh run rerun "${RUN_ID}" --repo "${GITHUB_REPOSITORY}" --failed
-              exit 0
-            fi
-          fi
-          gh workflow run ldxp-release.yml \
-            --repo "${GITHUB_REPOSITORY}" \
-            --ref main \
-            -f version="${VERSION}" \
-            -f upstream_commit="${UPSTREAM_COMMIT}" \
-            -f source_commit="${SOURCE_COMMIT}" \
-            -f candidate_branch="${BRANCH}" \
-            -f publish="${PUBLISH_RELEASE}"
+          DRY_RUN: ${{ inputs.dry_run || false }}
+          VALIDATE_CURRENT: ${{ inputs.validate_current || false }}
+        run: node scripts/release/sync_release.cjs

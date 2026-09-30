@@ -1,0 +1,221 @@
+diff --git a/crates/cockpit-core/src/modules/announcement.rs b/crates/cockpit-core/src/modules/announcement.rs
+index 36a4b050..98e473f0 100644
+--- a/crates/cockpit-core/src/modules/announcement.rs
++++ b/crates/cockpit-core/src/modules/announcement.rs
+@@ -697,12 +697,10 @@ pub async fn get_announcement_state() -> Result<AnnouncementState, String> {
+ }
+ 
+ pub async fn get_top_right_ad_state() -> Result<TopRightAdState, String> {
+-    let current_version = env!("CARGO_PKG_VERSION");
+-    let locale = config::get_user_config().language.to_lowercase();
+-    let raw_payload = load_announcements_raw().await?;
+-    let ad = filter_top_right_ad(raw_payload.top_right_ad, current_version, &locale);
+-    let ads = filter_top_right_ads(raw_payload.top_right_ads, current_version, &locale);
+-    Ok(TopRightAdState { ad, ads })
++    Ok(TopRightAdState {
++        ad: None,
++        ads: Vec::new(),
++    })
+ }
+ 
+ pub async fn mark_announcement_as_read(id: &str) -> Result<(), String> {
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index 2311646b..5e576ba6 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -429,8 +429,13 @@ pub fn run() {
+             // 初始化 Updater 插件
+             #[cfg(desktop)]
+             {
++                #[cfg(target_os = "macos")]
++                let updater = tauri_plugin_updater::Builder::new().target("darwin-universal");
++                #[cfg(not(target_os = "macos"))]
++                let updater = tauri_plugin_updater::Builder::new();
++
+                 app.handle()
+-                    .plugin(tauri_plugin_updater::Builder::new().build())?;
++                    .plugin(updater.build())?;
+                 app.handle().plugin(tauri_plugin_process::init())?;
+                 app.handle().plugin(tauri_plugin_autostart::init(
+                     tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+diff --git a/src-tauri/src/modules/announcement.rs b/src-tauri/src/modules/announcement.rs
+index 537eb5c2..eb15d4e7 100644
+--- a/src-tauri/src/modules/announcement.rs
++++ b/src-tauri/src/modules/announcement.rs
+@@ -1124,29 +1124,10 @@ pub async fn get_announcement_state() -> Result<AnnouncementState, String> {
+ }
+ 
+ pub async fn get_top_right_ad_state() -> Result<TopRightAdState, String> {
+-    let current_version = env!("CARGO_PKG_VERSION");
+-    let locale = config::get_user_config().language.to_lowercase();
+-    let raw_payload = load_announcements_raw().await?;
+-    if !raw_payload.top_right_ads_enabled {
+-        return Ok(TopRightAdState {
+-            ad: None,
+-            ads: Vec::new(),
+-        });
+-    }
+-
+-    let ad = filter_top_right_ad(
+-        raw_payload.top_right_ad,
+-        current_version,
+-        &locale,
+-        raw_payload.api_relay_enabled,
+-    );
+-    let ads = filter_top_right_ads(
+-        raw_payload.top_right_ads,
+-        current_version,
+-        &locale,
+-        raw_payload.api_relay_enabled,
+-    );
+-    Ok(TopRightAdState { ad, ads })
++    Ok(TopRightAdState {
++        ad: None,
++        ads: Vec::new(),
++    })
+ }
+ 
+ pub async fn get_sponsor_module_state() -> Result<SponsorModuleState, String> {
+diff --git a/src-tauri/src/modules/linux_updater.rs b/src-tauri/src/modules/linux_updater.rs
+index 1b34bf2f..d50b50f4 100644
+--- a/src-tauri/src/modules/linux_updater.rs
++++ b/src-tauri/src/modules/linux_updater.rs
+@@ -711,12 +711,7 @@ mod imp {
+ 
+     #[cfg(target_os = "macos")]
+     fn desktop_updater_target() -> Option<String> {
+-        let arch = match std::env::consts::ARCH {
+-            "aarch64" => "aarch64",
+-            "x86_64" => "x86_64",
+-            _ => return None,
+-        };
+-        Some(format!("darwin-{}-app", arch))
++        Some("darwin-universal".to_string())
+     }
+ 
+     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+diff --git a/src-tauri/tauri.conf.json b/src-tauri/tauri.conf.json
+index 42ef5b94..e850e461 100644
+--- a/src-tauri/tauri.conf.json
++++ b/src-tauri/tauri.conf.json
+@@ -112,10 +112,10 @@
+       }
+     },
+     "updater": {
+-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEMxRkU1RTdBRDdCRUUzM0QKUldROTQ3N1hlbDcrd1ZVQ2E3b1ZoVUdXL3BWQmpjdzNnWllNUW1LNHVwcE9wdGI1Q1UxQmdnQ0oK",
++      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERCMENFOEIyMDQ5OTBFQkUKUldTK0Rwa0VzdWdNMnhQS3NpSy9UWDF6VWxheUl2WTZYMzVuc2NGUUJubEYrakQ1VFE5SEp6eTQK",
+       "endpoints": [
+-        "https://github.com/jlcodes99/cockpit-tools/releases/latest/download/latest-{{target}}.json",
+-        "https://github.com/jlcodes99/cockpit-tools/releases/latest/download/latest.json"
++        "https://github.com/gucang0/tools/releases/latest/download/latest-{{target}}.json",
++        "https://github.com/gucang0/tools/releases/latest/download/latest.json"
+       ]
+     }
+   }
+diff --git a/src/stores/useTopRightAdStore.ts b/src/stores/useTopRightAdStore.ts
+index 4f5035a0..53e38876 100644
+--- a/src/stores/useTopRightAdStore.ts
++++ b/src/stores/useTopRightAdStore.ts
+@@ -7,7 +7,10 @@ const EMPTY_STATE: TopRightAdState = {
+   ads: [],
+ };
+ 
+-const TOP_RIGHT_AD_STATE_CACHE_KEY = 'agtools.top_right_ad_state.cache.v1';
++const TOP_RIGHT_AD_STATE_CACHE_KEYS = [
++  'agtools.top_right_ad_state.cache.v1',
++  'agtools.top_right_ad_state.cache.v2',
++];
+ 
+ interface TopRightAdStoreState {
+   state: TopRightAdState;
+@@ -17,14 +20,6 @@ interface TopRightAdStoreState {
+   forceRefreshState: () => Promise<TopRightAdState>;
+ }
+ 
+-function isTopRightAdState(value: unknown): value is TopRightAdState {
+-  if (!value || typeof value !== 'object') {
+-    return false;
+-  }
+-  const record = value as Partial<TopRightAdState>;
+-  return Array.isArray(record.ads);
+-}
+-
+ function normalizeTopRightAdState(state: TopRightAdState): TopRightAdState {
+   return {
+     ad: state.ad ?? state.ads?.[0] ?? null,
+@@ -38,27 +33,24 @@ function loadCachedTopRightAdState(): TopRightAdState {
+   }
+ 
+   try {
+-    const raw = localStorage.getItem(TOP_RIGHT_AD_STATE_CACHE_KEY);
+-    if (!raw) return EMPTY_STATE;
+-    const parsed = JSON.parse(raw) as { state?: unknown };
+-    return isTopRightAdState(parsed.state)
+-      ? normalizeTopRightAdState(parsed.state)
+-      : EMPTY_STATE;
++    for (const key of TOP_RIGHT_AD_STATE_CACHE_KEYS) {
++      localStorage.removeItem(key);
++    }
++    return EMPTY_STATE;
+   } catch {
+     return EMPTY_STATE;
+   }
+ }
+ 
+-function persistTopRightAdState(state: TopRightAdState): void {
++function clearTopRightAdStateCache(): void {
+   if (typeof localStorage === 'undefined') {
+     return;
+   }
+ 
+   try {
+-    localStorage.setItem(
+-      TOP_RIGHT_AD_STATE_CACHE_KEY,
+-      JSON.stringify({ savedAt: Date.now(), state: normalizeTopRightAdState(state) }),
+-    );
++    for (const key of TOP_RIGHT_AD_STATE_CACHE_KEYS) {
++      localStorage.removeItem(key);
++    }
+   } catch {
+     // 缓存写入失败不影响主流程。
+   }
+@@ -76,7 +68,7 @@ export const useTopRightAdStore = create<TopRightAdStoreState>((set, get) => ({
+     try {
+       const nextState = normalizeTopRightAdState(await getTopRightAdState());
+       set({ state: nextState, loading: false, initialized: true });
+-      persistTopRightAdState(nextState);
++      clearTopRightAdStateCache();
+       return nextState;
+     } catch (error) {
+       console.error('加载右上角广告位失败:', error);
+@@ -91,7 +83,7 @@ export const useTopRightAdStore = create<TopRightAdStoreState>((set, get) => ({
+     try {
+       const nextState = normalizeTopRightAdState(await forceRefreshTopRightAdState());
+       set({ state: nextState, loading: false, initialized: true });
+-      persistTopRightAdState(nextState);
++      clearTopRightAdStateCache();
+       return nextState;
+     } catch (error) {
+       console.error('强制刷新右上角广告位失败:', error);
+diff --git a/src/utils/updaterReleaseNotes.ts b/src/utils/updaterReleaseNotes.ts
+index 620f0096..2ec237f4 100644
+--- a/src/utils/updaterReleaseNotes.ts
++++ b/src/utils/updaterReleaseNotes.ts
+@@ -1,7 +1,7 @@
+ const ZH_SECTION_HEADER = '## 更新日志（中文）';
+ const EN_SECTION_HEADER = '## Changelog (English)';
+ const GITHUB_RELEASE_TAG_BASE_URL =
+-  'https://github.com/jlcodes99/cockpit-tools/releases/tag/v';
++  'https://github.com/gucang0/tools/releases/tag/v';
+ const RELEASE_HIGHLIGHTS: Record<string, { zh: string; en: string }> = {
+   '1.3.1': {
+     zh: `### 重要更新
+@@ -134,7 +134,7 @@ export function resolveUpdaterDownloadUrl(
+ 
+   const safeVersion = version.trim();
+   if (!safeVersion) {
+-    return 'https://github.com/jlcodes99/cockpit-tools/releases/latest';
++    return 'https://github.com/gucang0/tools/releases/latest';
+   }
+   return `${GITHUB_RELEASE_TAG_BASE_URL}${encodeURIComponent(safeVersion)}`;
+ }
