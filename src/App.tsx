@@ -51,6 +51,7 @@ import { useZedAccountStore } from './stores/useZedAccountStore';
 import { useSideNavLayoutStore } from './stores/useSideNavLayoutStore';
 import { usePlatformLayoutStore } from './stores/usePlatformLayoutStore';
 import { initializeClassicSidebar } from './utils/classicSidebarStartup';
+import { getAntigravityRuntimeTarget, resolveAntigravityStartupTarget, setAntigravityRuntimeTarget } from './utils/antigravityRuntimeTarget';
 import { useTopRightAdStore } from './stores/useTopRightAdStore';
 import { useSponsorStore } from './stores/useSponsorStore';
 import { useRemoteConfigStore } from './stores/useRemoteConfigStore';
@@ -343,6 +344,7 @@ function normalizeStoredActivePage(value: string | null): Page | null {
 
 /** 启动页偏好：`last` 表示恢复上次页面，其它为具体 Page id */
 function normalizeStartupPagePreference(value: string | null | undefined): 'last' | Page {
+  if (resolveAntigravityStartupTarget(value)) return 'overview';
   const normalized = value?.trim().toLowerCase();
   if (!normalized || normalized === 'last') {
     return 'last';
@@ -818,6 +820,8 @@ function MainApp() {
           return;
         }
         const preferred = normalizeStartupPagePreference(config.startup_page);
+        const antigravityTarget = resolveAntigravityStartupTarget(config.startup_page);
+        if (antigravityTarget) setAntigravityRuntimeTarget(antigravityTarget);
         if (preferred !== 'last') {
           setPage(preferred);
         }
@@ -3189,7 +3193,9 @@ function MainApp() {
       try {
         await Promise.all(
           refreshTasks.map(({ command, errorMessage }) =>
-            invoke(command).catch((error) => {
+            invoke(command, command === 'refresh_current_quota'
+              ? { runtimeTarget: getAntigravityRuntimeTarget() }
+              : undefined).catch((error) => {
               console.error(errorMessage, error);
             }),
           ),
