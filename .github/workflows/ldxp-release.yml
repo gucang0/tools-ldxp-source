@@ -49,6 +49,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.value }}
       source_commit: ${{ steps.version.outputs.source_commit }}
+      needs_go_sidecar: ${{ steps.layout.outputs.needs_go_sidecar }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -105,6 +106,13 @@ jobs:
             exit 1
           fi
           cat actual-diff.txt
+      - name: Inspect the validated source build layout
+        id: layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          NEEDS_GO_SIDECAR="$(node scripts/release/inspect_build_layout.cjs)"
+          echo "needs_go_sidecar=${NEEDS_GO_SIDECAR}" >> "${GITHUB_OUTPUT}"
       - name: Install, test, and build the validated frontend once
         run: |
           npm ci
@@ -155,6 +163,7 @@ jobs:
           cache-workspace-crates: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: ${{ needs.validate.outputs.needs_go_sidecar == 'true' }}
         with:
           go-version-file: sidecars/cockpit-cliproxy/go.mod
           cache-dependency-path: sidecars/cockpit-cliproxy/go.sum
@@ -232,6 +241,7 @@ jobs:
         shell: pwsh
         env:
           EXPECTED_VERSION: ${{ needs.validate.outputs.version }}
+          EXPECT_LEGACY_SIDECAR: ${{ needs.validate.outputs.needs_go_sidecar }}
         run: |
           $ErrorActionPreference = 'Stop'
           node scripts/release/stage_release_assets.cjs --platform windows --assets-dir target/release/bundle --output-dir unsigned-assets
@@ -247,10 +257,11 @@ jobs:
           & 7z x $setup[0].FullName '-owindows-package-unpacked' -y | Out-Null
           $payloads = @(Get-ChildItem windows-package-unpacked -Recurse -File -Filter 'cockpit-tools.exe')
           $sidecars = @(Get-ChildItem windows-package-unpacked -Recurse -File -Filter 'cockpit-cliproxy.exe')
-          if ($payloads.Count -ne 1 -or $sidecars.Count -ne 1) {
-            throw "Expected one packaged app and sidecar; found app=$($payloads.Count), sidecar=$($sidecars.Count)"
+          $expectedSidecars = [int]($env:EXPECT_LEGACY_SIDECAR -eq 'true')
+          if ($payloads.Count -ne 1 -or $sidecars.Count -ne $expectedSidecars) {
+            throw "Expected one packaged app and $expectedSidecars legacy sidecar(s); found app=$($payloads.Count), sidecar=$($sidecars.Count)"
           }
-          foreach ($binary in @($payloads[0], $sidecars[0])) {
+          foreach ($binary in (@($payloads) + @($sidecars))) {
             $bytes = [System.IO.File]::ReadAllBytes($binary.FullName)
             $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
             $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
@@ -283,6 +294,7 @@ jobs:
           cache-workspace-crates: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: ${{ needs.validate.outputs.needs_go_sidecar == 'true' }}
         with:
           go-version-file: sidecars/cockpit-cliproxy/go.mod
           cache-dependency-path: sidecars/cockpit-cliproxy/go.sum
@@ -304,6 +316,7 @@ jobs:
       - name: Verify Universal application architecture and version
         env:
           EXPECTED_VERSION: ${{ needs.validate.outputs.version }}
+          EXPECT_LEGACY_SIDECAR: ${{ needs.validate.outputs.needs_go_sidecar }}
         shell: bash
         run: |
           set -euo pipefail
@@ -311,9 +324,13 @@ jobs:
           BINARY="${APP}/Contents/MacOS/cockpit-tools"
           SIDECAR="${APP}/Contents/MacOS/cockpit-cliproxy"
           test -f "${BINARY}"
-          test -f "${SIDECAR}"
           lipo "${BINARY}" -verify_arch x86_64 arm64
-          lipo "${SIDECAR}" -verify_arch x86_64 arm64
+          if [[ "${EXPECT_LEGACY_SIDECAR}" == "true" ]]; then
+            test -f "${SIDECAR}"
+            lipo "${SIDECAR}" -verify_arch x86_64 arm64
+          else
+            test ! -e "${SIDECAR}"
+          fi
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${APP}/Contents/Info.plist")" = "${EXPECTED_VERSION}"
           codesign --display --verbose=2 "${APP}" || true
       - name: Create the Universal updater archive

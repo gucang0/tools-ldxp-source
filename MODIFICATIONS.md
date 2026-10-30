@@ -23,3 +23,4 @@ No commercial use is authorized by this repository.
 - Release-note URLs use scoped, exact-once literal replacements, independent of nearby release highlights or formatting. All other upstream content and trailing whitespace are preserved.
 - Missing, duplicated or overlapping targets fail closed and require maintenance. Runtime patches still require a clean application; unsafe fuzzy application and old-file copying are not used.
 - The detector runs candidate/sync regression tests before preparing or dispatching a release. Full build, signature, manifest and publication gates remain required.
+- Go setup and legacy sidecar package checks follow the validated Tauri configuration and source files. Native-only releases do not require the removed sidecar; inconsistent or unknown binary layouts fail before building.
