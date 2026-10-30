@@ -1,6 +1,21 @@
 {
   "schema": 1,
   "patch": "scripts/release/top-ad-updater.patch",
+  "literalReplacements": [
+    {
+      "file": "src/utils/updaterReleaseNotes.ts",
+      "replacements": [
+        {
+          "from": "'https://github.com/jlcodes99/cockpit-tools/releases/tag/v'",
+          "to": "'https://github.com/gucang0/tools/releases/tag/v'"
+        },
+        {
+          "from": "'https://github.com/jlcodes99/cockpit-tools/releases/latest'",
+          "to": "'https://github.com/gucang0/tools/releases/latest'"
+        }
+      ]
+    }
+  ],
   "runtimeFiles": [
     "crates/cockpit-core/src/modules/announcement.rs",
     "src-tauri/src/modules/announcement.rs",
