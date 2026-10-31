@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { stableRelease, decision, retryDecision, retryRead } = require('./sync_release.cjs');
+const { stableRelease, decision, retryDecision, retryRead, isMaintenanceFailure } = require('./sync_release.cjs');
 test('stable versions only, numeric comparison, no duplicate build', () => {
   for (const release of [{tag_name:'v1.2.3',draft:true}, {tag_name:'v1.2.3',prerelease:true}, {tag_name:'v1.2.3-beta'}]) assert.throws(() => stableRelease(release));
   assert.equal(stableRelease({tag_name:'v1.2.3',draft:false,prerelease:false}), '1.2.3');
@@ -25,4 +25,11 @@ test('read retries are bounded and do not retry authorization errors', async () 
   attempts=0;
   await assert.rejects(retryRead(() => {attempts++; throw Error('HTTP 403');}, async()=>{}));
   assert.equal(attempts,1);
+});
+test('maintenance failures are reported, while transient network failures are not', () => {
+  assert.equal(isMaintenanceFailure('Customization patch needs maintenance for v1.3.81'), true);
+  assert.equal(isMaintenanceFailure('Unrecognized external binary layout'), true);
+  assert.equal(isMaintenanceFailure('Literal target must occur exactly once'), true);
+  assert.equal(isMaintenanceFailure('HTTP 503 from GitHub'), false);
+  assert.equal(isMaintenanceFailure('TLS handshake timeout'), false);
 });

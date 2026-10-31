@@ -3,7 +3,16 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { git, replaceLiterals, expectedTree, prepareCandidate } = require('./prepare_candidate.cjs');
+const { git, replaceLiterals, validateRepositoryPolicy, expectedTree, prepareCandidate } = require('./prepare_candidate.cjs');
+
+test('central repository policy prevents official/release URL drift', () => {
+  const policy = require('./customization-policy.json');
+  assert.deepEqual(validateRepositoryPolicy(policy), {
+    official: 'jlcodes99/cockpit-tools', release: 'gucang0/tools', source: 'gucang0/tools-ldxp-source',
+  });
+  assert.throws(() => validateRepositoryPolicy({ ...policy, repositories: { ...policy.repositories, release: 'other/tools' } }), /repository drift/);
+  assert.throws(() => validateRepositoryPolicy({ ...policy, repositories: { ...policy.repositories, official: 'other/tools' } }), /repository drift/);
+});
 
 test('literal replacements preserve unrelated edits and whitespace without depending on highlights', () => {
   const { file, replacements } = require('./customization-policy.json').literalReplacements[0];

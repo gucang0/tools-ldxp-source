@@ -34,6 +34,7 @@ jobs:
     permissions:
       actions: write
       contents: write
+      issues: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -43,7 +44,7 @@ jobs:
         with:
           node-version: '20'
       - name: Test candidate preparation and sync guards
-        run: node --test scripts/release/prepare_candidate.test.cjs scripts/release/sync_release.test.cjs scripts/release/inspect_build_layout.test.cjs
+        run: node --test scripts/release/prepare_candidate.test.cjs scripts/release/sync_release.test.cjs scripts/release/inspect_build_layout.test.cjs scripts/release/report_maintenance_issue.test.cjs
       - name: Detect, prepare and dispatch
         env:
           GH_TOKEN: ${{ github.token }}

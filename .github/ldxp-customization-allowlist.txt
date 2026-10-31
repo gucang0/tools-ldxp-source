@@ -20,6 +20,8 @@ scripts/release/sync_release.test.cjs
 scripts/release/run_release_checks.cjs
 scripts/release/inspect_build_layout.cjs
 scripts/release/inspect_build_layout.test.cjs
+scripts/release/report_maintenance_issue.cjs
+scripts/release/report_maintenance_issue.test.cjs
 scripts/release/build_target_latest_json.cjs
 scripts/release/build_target_latest_json.test.cjs
 scripts/release/classify_upstream_conflict.cjs

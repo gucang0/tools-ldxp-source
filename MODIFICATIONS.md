@@ -24,3 +24,4 @@ No commercial use is authorized by this repository.
 - Missing, duplicated or overlapping targets fail closed and require maintenance. Runtime patches still require a clean application; unsafe fuzzy application and old-file copying are not used.
 - The detector runs candidate/sync regression tests before preparing or dispatching a release. Full build, signature, manifest and publication gates remain required.
 - Go setup and legacy sidecar package checks follow the validated Tauri configuration and source files. Native-only releases do not require the removed sidecar; inconsistent or unknown binary layouts fail before building.
+- Official, source and release repositories are declared centrally in the customization policy. Deterministic upstream or build-shape failures create one deduplicated maintenance Issue per version, phase and source commit; no failed run can bypass release gates.

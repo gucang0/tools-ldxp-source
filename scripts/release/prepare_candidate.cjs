@@ -29,6 +29,21 @@ function replaceLiterals(content, replacements, file) {
   return content;
 }
 
+function validateRepositoryPolicy(policy) {
+  const repositories = policy.repositories || {};
+  if (!policy.repositories) return { official: 'jlcodes99/cockpit-tools', release: 'gucang0/tools', source: 'gucang0/tools-ldxp-source' };
+  const official = repositories.official || 'jlcodes99/cockpit-tools';
+  const release = repositories.release || 'gucang0/tools';
+  for (const entry of policy.literalReplacements || []) {
+    for (const replacement of entry.replacements || []) {
+      if (!replacement.from.includes(official) || !replacement.to.includes(release)) {
+        throw Error(`Literal replacement repository drift for ${entry.file}; update repositories and targets together`);
+      }
+    }
+  }
+  return { official, release, source: repositories.source || 'gucang0/tools-ldxp-source' };
+}
+
 function baseline(version, commit) {
   return `# Upstream Baseline\n\nThis customization is based on the Cockpit Tools ${version} release source.\n\n- Upstream repository: https://github.com/jlcodes99/cockpit-tools\n- Upstream tag: \`v${version}\`\n- Verified source commit: \`${commit}\`\n- License: CC BY-NC-SA 4.0\n\nOnly the top banner is disabled; other announcements, Sponsor features and\nbusiness logic follow upstream. Signed updates use \`gucang0/tools\`.\n`;
 }
@@ -46,6 +61,7 @@ function officialVersion(root, upstream, version) {
 function expectedTree(root, upstream, main, version, policyOverride) {
   officialVersion(root, upstream, version);
   const policy = policyOverride || JSON.parse(git(root, ['show', `${main}:scripts/release/customization-policy.json`]));
+  validateRepositoryPolicy(policy);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cockpit-index-'));
   const env = { ...process.env, GIT_INDEX_FILE: path.join(dir, 'index') };
   const indexed = (args, options = {}) => git(root, args, { env, ...options });
@@ -105,4 +121,4 @@ function prepareCandidate(root, upstream, main, version, previous) {
   return git(root, ['commit-tree', tree, ...parents.flatMap(p => ['-p', p]), '-m', `ci: prepare official v${version} with top banner and updater patches`]);
 }
 
-module.exports = { git, baseline, officialVersion, replaceLiterals, expectedTree, prepareCandidate };
+module.exports = { git, baseline, officialVersion, replaceLiterals, validateRepositoryPolicy, expectedTree, prepareCandidate };

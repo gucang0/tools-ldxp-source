@@ -4,6 +4,22 @@ const { execFileSync } = require('node:child_process');
 const { git, officialVersion, prepareCandidate } = require('./prepare_candidate.cjs');
 const { compareVersions } = require('./release_state.cjs');
 const { isTransientFailure } = require('./bundle_with_retry.cjs');
+const { reportMaintenanceIssue } = require('./report_maintenance_issue.cjs');
+
+let maintenanceContext = {
+  phase: 'detect',
+  version: 'unknown',
+  sourceCommit: process.env.GITHUB_SHA || 'unknown',
+  officialRepository: 'jlcodes99/cockpit-tools',
+};
+
+function readPolicy(root) {
+  return JSON.parse(fs.readFileSync(path.join(root, 'scripts/release/customization-policy.json'), 'utf8'));
+}
+
+function isMaintenanceFailure(message) {
+  return /patch failed|needs maintenance|Unrecognized external binary|sidecar source|scope differs|exactly once|official version mismatch|candidate v\S+ needs maintenance|could not compile|version mismatch|signature.*(?:invalid|mismatch)/i.test(message);
+}
 
 function stableRelease(release) {
   if (!release || release.draft || release.prerelease || !/^v\d+\.\d+\.\d+$/.test(release.tag_name)) throw Error('Expected a stable official release');
@@ -32,8 +48,14 @@ async function retryRead(fn, sleep = ms => new Promise(r => setTimeout(r, ms))) 
 }
 async function main() {
   const root = path.resolve(__dirname, '../..');
+  const policy = readPolicy(root);
+  const repositories = policy.repositories || {};
+  const officialRepository = repositories.official || 'jlcodes99/cockpit-tools';
+  const releaseRepository = repositories.release || 'gucang0/tools';
+  const sourceRepository = repositories.source || 'gucang0/tools-ldxp-source';
+  maintenanceContext.officialRepository = officialRepository;
   const repo = process.env.GITHUB_REPOSITORY;
-  if (repo !== 'gucang0/tools-ldxp-source' || process.env.GITHUB_REF !== 'refs/heads/main') throw Error('Sync must run from the source repository main workflow');
+  if (repo !== sourceRepository || process.env.GITHUB_REF !== 'refs/heads/main') throw Error('Sync must run from the source repository main workflow');
   const dryRun = process.env.DRY_RUN === 'true';
   const validateCurrent = process.env.VALIDATE_CURRENT === 'true';
   if (validateCurrent && !dryRun) throw Error('Current-version validation must be a dry run');
@@ -43,9 +65,11 @@ async function main() {
     console.log(text);
     if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, text + '\n');
   };
-  const upstreamRelease = await api('repos/jlcodes99/cockpit-tools/releases/latest');
+  const upstreamRelease = await api(`repos/${officialRepository}/releases/latest`);
   const version = stableRelease(upstreamRelease);
-  const published = stableRelease(await api('repos/gucang0/tools/releases/latest'));
+  maintenanceContext.version = version;
+  maintenanceContext.phase = 'candidate-prepare';
+  const published = stableRelease(await api(`repos/${releaseRepository}/releases/latest`));
   const { workflow_runs: runs } = await api(`repos/${repo}/actions/workflows/ldxp-release.yml/runs?event=workflow_dispatch&per_page=100`);
   const next = decision(version, published, runs.some(r => r.status !== 'completed'), validateCurrent);
   summary(`Official: v${version}; published: v${published}; decision: ${next}`);
@@ -55,8 +79,9 @@ async function main() {
   await retryRead(() => git(root, ['fetch', 'origin', 'main']));
   const mainCommit = git(root, ['rev-parse', 'origin/main']);
   if (mainCommit !== process.env.GITHUB_SHA) throw Error('Main changed after dispatch; wait for the next check');
-  await retryRead(() => git(root, ['fetch', 'https://github.com/jlcodes99/cockpit-tools.git', `refs/tags/v${version}`]));
+  await retryRead(() => git(root, ['fetch', `https://github.com/${officialRepository}.git`, `refs/tags/v${version}`]));
   const upstream = git(root, ['rev-parse', 'FETCH_HEAD^{commit}']);
+  maintenanceContext.sourceCommit = mainCommit;
   officialVersion(root, upstream, version);
   const branch = `automation/candidate-v${version}`;
   const remote = await retryRead(() => git(root, ['ls-remote', '--heads', 'origin', `refs/heads/${branch}`]));
@@ -79,7 +104,7 @@ async function main() {
   // Recheck before dispatch; the scheduled/manual detector is serialized as well.
   const active = await api(`repos/${repo}/actions/workflows/ldxp-release.yml/runs?event=workflow_dispatch&per_page=100`);
   if (active.workflow_runs.some(r => r.status !== 'completed')) { summary('A release is active; candidate preserved for the next check.'); return; }
-  if (!dryRun && compareVersions(version, stableRelease(await api('repos/gucang0/tools/releases/latest'))) <= 0) { summary('Version already published; no dispatch.'); return; }
+  if (!dryRun && compareVersions(version, stableRelease(await api(`repos/${releaseRepository}/releases/latest`))) <= 0) { summary('Version already published; no dispatch.'); return; }
   gh(['workflow', 'run', 'ldxp-release.yml', '--repo', repo, '--ref', 'main',
     '-f', `version=${version}`, '-f', `upstream_commit=${upstream}`, '-f', `source_commit=${source}`,
     '-f', `candidate_branch=${branch}`, '-f', `publish=${!dryRun}`]);
@@ -88,7 +113,28 @@ async function main() {
 if (require.main === module) main().catch(error => {
   const message = `BLOCKED: ${error.message}`;
   console.error(message);
+  if (isMaintenanceFailure(message)) {
+    const runUrl = process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID
+      ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
+      : '';
+    try {
+      const result = reportMaintenanceIssue({
+        phase: maintenanceContext.phase,
+        version: maintenanceContext.version,
+        sourceCommit: maintenanceContext.sourceCommit,
+        runUrl,
+        error: message,
+        failedJobs: process.env.FAILED_JOBS,
+        repository: process.env.GITHUB_REPOSITORY,
+        officialRepository: maintenanceContext.officialRepository,
+      });
+      if (result.created) console.error(`[maintenance-report] created ${result.url}`);
+      else if (result.reason === 'already-open') console.error(`[maintenance-report] existing issue: ${result.title}`);
+    } catch (reportError) {
+      console.error(`[maintenance-report] ${reportError.message}`);
+    }
+  }
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n${message}\n`);
   process.exitCode = 1;
 });
-module.exports = { stableRelease, decision, retryDecision, retryRead };
+module.exports = { stableRelease, decision, retryDecision, retryRead, isMaintenanceFailure };
