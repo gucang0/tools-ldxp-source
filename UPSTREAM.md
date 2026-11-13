@@ -1,10 +1,10 @@
 # Upstream Baseline
 
-This customization is based on the Cockpit Tools 1.3.81 release source.
+This customization is based on the Cockpit Tools 1.3.83 release source.
 
 - Upstream repository: https://github.com/jlcodes99/cockpit-tools
-- Upstream tag: `v1.3.81`
-- Verified source commit: `890d7c9034de4297f7fc644aff3e68c4f62a9e35`
+- Upstream tag: `v1.3.83`
+- Verified source commit: `efaadf9117de1726f166868fe07963dd8ad65c40`
 - License: CC BY-NC-SA 4.0
 
 Only the top banner is disabled; other announcements, Sponsor features and
