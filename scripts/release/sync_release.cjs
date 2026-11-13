@@ -30,12 +30,20 @@ function decision(upstream, published, active, validateCurrent = false) {
   if (active) return 'busy';
   return 'prepare';
 }
-function retryDecision(runs, title, main, logs) {
+function retryDecision(runs, title, main, logsByRun = {}) {
   const failed = runs.filter(r => r.display_title === title && r.head_sha === main && ['failure', 'cancelled', 'timed_out'].includes(r.conclusion));
   if (!failed.length) return 'dispatch';
   if (failed.reduce((n, r) => n + (r.run_attempt || 1), 0) >= 3) return 'blocked';
-  if (/error\[E\d+\]|could not compile|test failed|version mismatch|signature.*(invalid|mismatch)/i.test(logs)) return 'blocked';
-  return isTransientFailure(logs) || /HTTP (408|429|5\d\d)/i.test(logs) ? 'dispatch' : 'blocked';
+  // Cancellation and job timeouts may be caused by runner limits, rather than
+  // an incompatible source tree. Retry them only within the shared budget.
+  // Every actual failure must still be classified: a later cancellation must
+  // never hide an earlier deterministic or unknown build failure.
+  for (const run of failed.filter(r => r.conclusion === 'failure')) {
+    const logs = logsByRun[run.id] || '';
+    if (/error\[E\d+\]|could not compile|test failed|version mismatch|signature.*(invalid|mismatch)/i.test(logs)) return 'blocked';
+    if (!isTransientFailure(logs) && !/HTTP (408|429|5\d\d)/i.test(logs)) return 'blocked';
+  }
+  return 'dispatch';
 }
 async function retryRead(fn, sleep = ms => new Promise(r => setTimeout(r, ms))) {
   for (let attempt = 0; ; attempt++) {
@@ -94,11 +102,15 @@ async function main() {
   git(root, ['config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com']);
   const source = prepareCandidate(root, upstream, mainCommit, version, previous);
   const title = `Cockpit Tools v${version} | ${dryRun ? 'dry-run' : 'publish'} | ${source}`;
-  const failed = runs.find(r => r.display_title === title && r.head_sha === mainCommit && ['failure', 'cancelled', 'timed_out'].includes(r.conclusion));
-  const logs = failed ? await retryRead(() => gh(['run', 'view', String(failed.id), '--repo', repo, '--log-failed'])) : '';
-  if (retryDecision(runs, title, mainCommit, logs) === 'blocked') {
-    throw Error(`Candidate v${version} needs maintenance; refusing repeated builds. Failed run: ${failed?.html_url}. A repaired main commit is re-evaluated automatically.`);
+  const failedRuns = runs.filter(r => r.display_title === title && r.head_sha === mainCommit && ['failure', 'cancelled', 'timed_out'].includes(r.conclusion));
+  const logsByRun = {};
+  for (const run of failedRuns.filter(r => r.conclusion === 'failure')) {
+    logsByRun[run.id] = await retryRead(() => gh(['run', 'view', String(run.id), '--repo', repo, '--log-failed']));
   }
+  if (retryDecision(runs, title, mainCommit, logsByRun) === 'blocked') {
+    throw Error(`Candidate v${version} needs maintenance; refusing repeated builds. Failed run: ${failedRuns[0]?.html_url}. A repaired main commit is re-evaluated automatically.`);
+  }
+  if (failedRuns.length) summary(`Retrying candidate after ${failedRuns.length} failed/cancelled run(s), within the 3-attempt limit.`);
   // A normal push must fast-forward an existing candidate; never force-push it.
   git(root, ['push', 'origin', `${source}:refs/heads/${branch}`]);
   // Recheck before dispatch; the scheduled/manual detector is serialized as well.

@@ -11,12 +11,23 @@ test('stable versions only, numeric comparison, no duplicate build', () => {
   assert.equal(decision('1.3.10','1.3.10',false,true), 'prepare');
 });
 test('only transient failures retry and changed main clears deterministic blockers', () => {
-  const run = {display_title:'candidate',head_sha:'main1',conclusion:'failure',run_attempt:1};
-  assert.equal(retryDecision([run], 'candidate','main1','HTTP status: 503'), 'dispatch');
-  assert.equal(retryDecision([run], 'candidate','main1','could not compile'), 'blocked');
-  assert.equal(retryDecision([run], 'candidate','main2','could not compile'), 'dispatch');
-  assert.equal(retryDecision([{...run,run_attempt:3}], 'candidate','main1','HTTP status: 503'), 'blocked');
-  assert.equal(retryDecision([run,run,run], 'candidate','main1','HTTP status: 503'), 'blocked');
+  const run = {id:1,display_title:'candidate',head_sha:'main1',conclusion:'failure',run_attempt:1};
+  assert.equal(retryDecision([run], 'candidate','main1',{1:'HTTP status: 503'}), 'dispatch');
+  assert.equal(retryDecision([run], 'candidate','main1',{1:'could not compile'}), 'blocked');
+  assert.equal(retryDecision([run], 'candidate','main1',{}), 'blocked');
+  assert.equal(retryDecision([run], 'candidate','main2',{1:'could not compile'}), 'dispatch');
+  assert.equal(retryDecision([{...run,run_attempt:3}], 'candidate','main1',{1:'HTTP status: 503'}), 'blocked');
+  assert.equal(retryDecision([run,run,run], 'candidate','main1',{1:'HTTP status: 503'}), 'blocked');
+});
+test('cancelled or timed out runs retry within budget without masking failures', () => {
+  const cancelled = {id:2,display_title:'candidate',head_sha:'main1',conclusion:'cancelled',run_attempt:1};
+  const timedOut = {...cancelled,id:3,conclusion:'timed_out'};
+  const failed = {...cancelled,id:4,conclusion:'failure'};
+  assert.equal(retryDecision([cancelled], 'candidate','main1'), 'dispatch');
+  assert.equal(retryDecision([timedOut], 'candidate','main1'), 'dispatch');
+  assert.equal(retryDecision([{...cancelled,run_attempt:3}], 'candidate','main1'), 'blocked');
+  assert.equal(retryDecision([cancelled,failed], 'candidate','main1',{4:'error[E1234]: failed'}), 'blocked');
+  assert.equal(retryDecision([cancelled,failed], 'candidate','main1',{4:'HTTP 503'}), 'dispatch');
 });
 test('read retries are bounded and do not retry authorization errors', async () => {
   let attempts=0;
