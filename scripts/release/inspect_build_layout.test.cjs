@@ -27,7 +27,7 @@ test('both platform builds and package checks consume the validated source layou
   const workflow = fs.readFileSync(path.resolve(__dirname, '../../.github/workflows/ldxp-release.yml'), 'utf8');
   assert.match(workflow, /needs_go_sidecar: \$\{\{ steps\.layout\.outputs\.needs_go_sidecar \}\}/);
   assert.match(workflow, /node scripts\/release\/inspect_build_layout\.cjs/);
-  assert.equal((workflow.match(/if: \$\{\{ needs\.validate\.outputs\.needs_go_sidecar == 'true' \}\}/g) || []).length, 2);
+  assert.equal((workflow.match(/if: \$\{\{ needs\.validate\.outputs\.needs_go_sidecar == 'true' \}\}/g) || []).length, 3);
   assert.equal((workflow.match(/EXPECT_LEGACY_SIDECAR: \$\{\{ needs\.validate\.outputs\.needs_go_sidecar \}\}/g) || []).length, 2);
   assert.match(workflow, /\$sidecars\.Count -ne \$expectedSidecars/);
   assert.match(workflow, /test ! -e "\$\{SIDECAR\}"/);

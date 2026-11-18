@@ -10,10 +10,9 @@ This repository customizes Cockpit Tools for personal and noncommercial sharing.
 
 ## Changes
 
-- Top promotional content is disabled.
-- The top promotion area is empty and old promotion caches are ignored.
+- The official top promotion setting defaults to disabled. The official setting and promotion data path remain available if a user enables it.
 - Signed application updates use the noncommercial build's release repository.
-- Windows x64 and macOS Universal packages are built by a guarded workflow.
+- Windows x64 and macOS Universal packages are built by a guarded workflow. macOS arm64 and Intel compilation runs in parallel before the Universal merge.
 
 No commercial use is authorized by this repository.
 
@@ -25,3 +24,4 @@ No commercial use is authorized by this repository.
 - The detector runs candidate/sync regression tests before preparing or dispatching a release. Full build, signature, manifest and publication gates remain required.
 - Go setup and legacy sidecar package checks follow the validated Tauri configuration and source files. Native-only releases do not require the removed sidecar; inconsistent or unknown binary layouts fail before building.
 - Official, source and release repositories are declared centrally in the customization policy. Deterministic upstream or build-shape failures create one deduplicated maintenance Issue per version, phase and source commit; no failed run can bypass release gates.
+- The official release detector runs hourly. The previous sequential workflows are preserved under `automation-backups/2026-11-18/`.
