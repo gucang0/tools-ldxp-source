@@ -1124,10 +1124,29 @@ pub async fn get_announcement_state() -> Result<AnnouncementState, String> {
 }
 
 pub async fn get_top_right_ad_state() -> Result<TopRightAdState, String> {
-    Ok(TopRightAdState {
-        ad: None,
-        ads: Vec::new(),
-    })
+    let current_version = env!("CARGO_PKG_VERSION");
+    let locale = config::get_user_config().language.to_lowercase();
+    let raw_payload = load_announcements_raw().await?;
+    if !raw_payload.top_right_ads_enabled {
+        return Ok(TopRightAdState {
+            ad: None,
+            ads: Vec::new(),
+        });
+    }
+
+    let ad = filter_top_right_ad(
+        raw_payload.top_right_ad,
+        current_version,
+        &locale,
+        raw_payload.api_relay_enabled,
+    );
+    let ads = filter_top_right_ads(
+        raw_payload.top_right_ads,
+        current_version,
+        &locale,
+        raw_payload.api_relay_enabled,
+    );
+    Ok(TopRightAdState { ad, ads })
 }
 
 pub async fn get_sponsor_module_state() -> Result<SponsorModuleState, String> {
