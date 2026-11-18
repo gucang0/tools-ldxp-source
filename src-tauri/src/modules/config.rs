@@ -1146,7 +1146,7 @@ fn default_codex_hide_relay_quota() -> bool {
     false
 }
 fn default_top_right_ad_visible() -> bool {
-    true
+    false
 }
 fn default_antigravity_dual_switch_no_restart_enabled() -> bool {
     false
