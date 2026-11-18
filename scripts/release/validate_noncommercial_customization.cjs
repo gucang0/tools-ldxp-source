@@ -23,6 +23,10 @@ function main() {
   if (config.version !== version || JSON.stringify(config.plugins?.updater?.endpoints) !== JSON.stringify(expectedEndpoints)) throw Error('Version or updater channel mismatch');
   const signingKey='dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERCMENFOEIyMDQ5OTBFQkUKUldTK0Rwa0VzdWdNMnhQS3NpSy9UWDF6VWxheUl2WTZYMzVuc2NGUUJubEYrakQ1VFE5SEp6eTQK';
   if(config.plugins.updater.pubkey !== signingKey) throw Error('Existing updater key changed; old-client compatibility would break');
+  const configSource = git(root, ['show', 'HEAD:src-tauri/src/modules/config.rs']);
+  if (!/fn default_top_right_ad_visible\(\) -> bool \{\s+false\s+\}/m.test(configSource)) {
+    throw Error('Top promotion default must remain disabled');
+  }
   const release=JSON.parse(git(root,['show','HEAD:src-tauri/tauri.release.conf.json']));
   if(release.build?.beforeBuildCommand !== '' || release.bundle?.createUpdaterArtifacts !== false) throw Error('Release must reuse verified frontend and isolated signing');
   console.log(`Validated exact official source + top-banner/updater patches for ${version}`);

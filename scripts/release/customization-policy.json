@@ -22,15 +22,16 @@
     }
   ],
   "runtimeFiles": [
-    "crates/cockpit-core/src/modules/announcement.rs",
-    "src-tauri/src/modules/announcement.rs",
+    "src-tauri/src/modules/config.rs",
     "src-tauri/src/lib.rs",
     "src-tauri/src/modules/linux_updater.rs",
     "src-tauri/tauri.conf.json",
-    "src/stores/useTopRightAdStore.ts",
     "src/utils/updaterReleaseNotes.ts"
   ],
   "ownedFiles": [
+    "automation-backups/2026-11-18/README.md",
+    "automation-backups/2026-11-18/ldxp-release-sequential-v1.4.2.yml",
+    "automation-backups/2026-11-18/upstream-sync-v1.4.2.yml",
     ".github/ldxp-customization-allowlist.txt",
     "MODIFICATIONS.md",
     "scripts/release/customization-policy.json",
@@ -41,6 +42,7 @@
     "scripts/release/sync_release.test.cjs",
     "scripts/release/run_release_checks.cjs",
     "scripts/release/inspect_build_layout.cjs",
+    "scripts/release/inspect_build_layout.test.cjs",
     "scripts/release/inspect_build_layout.test.cjs",
     "scripts/release/report_maintenance_issue.cjs",
     "scripts/release/report_maintenance_issue.test.cjs",
