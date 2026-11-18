@@ -1,8 +1,8 @@
-name: Check Official Release Every 6 Hours
+name: Check Official Release Hourly
 
 on:
   schedule:
-    - cron: '17 */6 * * *'
+    - cron: '17 * * * *'
   workflow_dispatch:
     inputs:
       force_check:

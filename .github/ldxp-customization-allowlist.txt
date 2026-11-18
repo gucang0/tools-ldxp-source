@@ -1,4 +1,7 @@
 .github/ldxp-customization-allowlist.txt
+automation-backups/2026-11-18/README.md
+automation-backups/2026-11-18/ldxp-release-sequential-v1.4.2.yml
+automation-backups/2026-11-18/upstream-sync-v1.4.2.yml
 .github/workflows/codeql.yml
 .github/workflows/ldxp-release.yml
 .github/workflows/upstream-sync.yml
@@ -6,6 +9,7 @@
 MODIFICATIONS.md
 UPSTREAM.md
 crates/cockpit-core/src/modules/announcement.rs
+src-tauri/src/modules/config.rs
 scripts/release/build_ldxp_latest_json.cjs
 scripts/release/bundle_with_retry.cjs
 scripts/release/bundle_with_retry.test.cjs
