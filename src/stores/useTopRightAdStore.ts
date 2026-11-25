@@ -7,10 +7,7 @@ const EMPTY_STATE: TopRightAdState = {
   ads: [],
 };
 
-const TOP_RIGHT_AD_STATE_CACHE_KEYS = [
-  'agtools.top_right_ad_state.cache.v1',
-  'agtools.top_right_ad_state.cache.v2',
-];
+const TOP_RIGHT_AD_STATE_CACHE_KEY = 'agtools.top_right_ad_state.cache.v1';
 
 interface TopRightAdStoreState {
   state: TopRightAdState;
@@ -18,6 +15,14 @@ interface TopRightAdStoreState {
   initialized: boolean;
   fetchState: () => Promise<TopRightAdState>;
   forceRefreshState: () => Promise<TopRightAdState>;
+}
+
+function isTopRightAdState(value: unknown): value is TopRightAdState {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const record = value as Partial<TopRightAdState>;
+  return Array.isArray(record.ads);
 }
 
 function normalizeTopRightAdState(state: TopRightAdState): TopRightAdState {
@@ -33,24 +38,27 @@ function loadCachedTopRightAdState(): TopRightAdState {
   }
 
   try {
-    for (const key of TOP_RIGHT_AD_STATE_CACHE_KEYS) {
-      localStorage.removeItem(key);
-    }
-    return EMPTY_STATE;
+    const raw = localStorage.getItem(TOP_RIGHT_AD_STATE_CACHE_KEY);
+    if (!raw) return EMPTY_STATE;
+    const parsed = JSON.parse(raw) as { state?: unknown };
+    return isTopRightAdState(parsed.state)
+      ? normalizeTopRightAdState(parsed.state)
+      : EMPTY_STATE;
   } catch {
     return EMPTY_STATE;
   }
 }
 
-function clearTopRightAdStateCache(): void {
+function persistTopRightAdState(state: TopRightAdState): void {
   if (typeof localStorage === 'undefined') {
     return;
   }
 
   try {
-    for (const key of TOP_RIGHT_AD_STATE_CACHE_KEYS) {
-      localStorage.removeItem(key);
-    }
+    localStorage.setItem(
+      TOP_RIGHT_AD_STATE_CACHE_KEY,
+      JSON.stringify({ savedAt: Date.now(), state: normalizeTopRightAdState(state) }),
+    );
   } catch {
     // 缓存写入失败不影响主流程。
   }
@@ -68,7 +76,7 @@ export const useTopRightAdStore = create<TopRightAdStoreState>((set, get) => ({
     try {
       const nextState = normalizeTopRightAdState(await getTopRightAdState());
       set({ state: nextState, loading: false, initialized: true });
-      clearTopRightAdStateCache();
+      persistTopRightAdState(nextState);
       return nextState;
     } catch (error) {
       console.error('加载右上角广告位失败:', error);
@@ -83,7 +91,7 @@ export const useTopRightAdStore = create<TopRightAdStoreState>((set, get) => ({
     try {
       const nextState = normalizeTopRightAdState(await forceRefreshTopRightAdState());
       set({ state: nextState, loading: false, initialized: true });
-      clearTopRightAdStateCache();
+      persistTopRightAdState(nextState);
       return nextState;
     } catch (error) {
       console.error('强制刷新右上角广告位失败:', error);

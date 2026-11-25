@@ -697,10 +697,12 @@ pub async fn get_announcement_state() -> Result<AnnouncementState, String> {
 }
 
 pub async fn get_top_right_ad_state() -> Result<TopRightAdState, String> {
-    Ok(TopRightAdState {
-        ad: None,
-        ads: Vec::new(),
-    })
+    let current_version = env!("CARGO_PKG_VERSION");
+    let locale = config::get_user_config().language.to_lowercase();
+    let raw_payload = load_announcements_raw().await?;
+    let ad = filter_top_right_ad(raw_payload.top_right_ad, current_version, &locale);
+    let ads = filter_top_right_ads(raw_payload.top_right_ads, current_version, &locale);
+    Ok(TopRightAdState { ad, ads })
 }
 
 pub async fn mark_announcement_as_read(id: &str) -> Result<(), String> {
